@@ -1,0 +1,1 @@
+A multi-agent travel orchestration engine built with LangGraph, LangChain, and FastAPI. The application accepts natural-language user prompts to automatically generate comprehensive travel plans, including optimized flight options, hotel recommendations, and day-by-day itineraries.
