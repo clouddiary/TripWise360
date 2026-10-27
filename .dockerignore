@@ -1,0 +1,50 @@
+# ── Virtual environments ──────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Secrets — never bake into image ──────────────────────────────────
+.env
+.envrc
+*.pem
+*.key
+*.p12
+
+# ── Python cache ──────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*$py.class
+*.pyc
+
+# ── Test & dev files ──────────────────────────────────────────────────
+test.py
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Git & CI ──────────────────────────────────────────────────────────
+.git/
+.gitignore
+.github/
+
+# ── IDE / editor ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Build artifacts ───────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+
+# ── Docs & local notes ────────────────────────────────────────────────
+readme.md
+README.md
+*.md
+
+# ── macOS noise ───────────────────────────────────────────────────────
+.DS_Store
