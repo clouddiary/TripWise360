@@ -14,50 +14,8 @@ A production-ready, multi-agent AI travel planning application built with **Lang
 
 ## 📸 Architecture
 
-```
-                        ┌──────────────────┐
-                        │   User Request    │
-                        │  (Natural Lang.)  │
-                        └────────┬─────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │     FastAPI Endpoint     │
-                    │      POST /api/travel    │
-                    └────────────┬────────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │   LangGraph StateGraph   │
-                    │   (Shared TravelState)   │
-                    └────┬──────┬──────┬──────┘
-                         │      │      │
-           ┌─────────────▼─┐  ┌─▼────────────┐
-           │ Flight Agent  │  │  Hotel Agent  │
-           │               │  │               │
-           │ AviationStack │  │  Tavily MCP   │
-           │    MCP (stdio)│  │   (HTTP)      │
-           └───────┬───────┘  └──────┬────────┘
-                   │                 │
-           ┌───────▼───────┐  ┌──────▼────────┐
-           │ Weather Agent │  │Itinerary Agent│
-           │               │  │               │
-           │ Custom Weather│  │  OpenAI LLM   │
-           │  MCP (stdio)  │  │               │
-           └───────┬───────┘  └──────┬────────┘
-                   │                 │
-                   └────────┬────────┘
-                            │
-               ┌────────────▼────────────┐
-               │      Final Agent         │
-               │  Formats full response   │
-               │      OpenAI LLM          │
-               └────────────┬────────────┘
-                            │
-               ┌────────────▼────────────┐
-               │   PostgreSQL (Render)    │
-               │  LangGraph Checkpointer  │
-               │  (Conversation Memory)   │
-               └─────────────────────────┘
-```
+
+![TripWise Arch Diagram](docs/screenshots/multi-agent-sequencial.jpg)
 
 ---
 
@@ -384,9 +342,9 @@ TripWise 360 prints richly colored, structured logs to the terminal so you can f
 
 ![TripWise 360 main interface showing a Dubai trip query with results](docs/screenshots/ui.png)
 
-### UI — Agent Progress Tracker
+### UI — Agent final response
 
-The agent progress bar appears while the pipeline is running, showing each agent lighting up in sequence.
+The agent providing final Itinerary
 
 ![Agent progress tracker showing Flights → Hotels → Weather → Itinerary running](docs/screenshots/agent-result.png)
 
