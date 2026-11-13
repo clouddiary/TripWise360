@@ -374,6 +374,122 @@ LangGraph StateGraph                                                          �
 
 ---
 
+## 🖥️ Demo Logs — Colored Terminal Output
+
+TripWise 360 prints richly colored, structured logs to the terminal so you can follow every agent step, LLM call, MCP tool invocation, and state transition in real time — ideal for demos and debugging.
+
+### UI Screenshot
+
+![TripWise 360 UI](docs/screenshots/ui.png)
+
+### Log Output — Flight Agent Pipeline
+
+![Terminal logs showing Flight Agent, LLM calls, AviationStack MCP](docs/screenshots/logs.png)
+
+> **To add the screenshots:** save your terminal/UI screenshots as `docs/screenshots/ui.png` and `docs/screenshots/logs.png`.
+
+### Log Color Scheme
+
+| Color | Tag | Fired when |
+|---|---|---|
+| **Bold White** | `[SYSTEM  ]` | App startup, graph build, DB connection |
+| **Bold Cyan** | `[AGENT ▶ ]` / `[AGENT ✔ ]` | Agent node starts / finishes |
+| **Bold Magenta** | `[LLM  🧠 ]` / `[LLM  ✔  ]` | Every LLM invocation and response |
+| **Bold Yellow** | `[MCP  🔧 ]` / `[MCP  ✔  ]` | MCP tool call dispatched / result received |
+| **Bold Red** | `[MCP  ✖  ]` / `[ERROR  ✖]` | MCP failure or non-fatal fallback |
+| **Bold Blue** | `[STATE 📖]` / `[STATE 📝]` | Shared state read / write |
+| **Bold Green** | `[RESULT ✦]` | Meaningful data obtained (IATA codes, MCP ready, etc.) |
+| **Dim white** | `────` | Section dividers between pipeline steps |
+
+### Sample Log Trace
+
+```
+════════════════════════════════════════════════════════════════
+  🌍 TRIPWISE 360  ·  NEW REQUEST
+  Thread : user_a2da006a1b104d4f889c8edb63bd44e0
+  Query  : Plan a 5 days Maldives honeymoon trip from New York…
+════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────
+14:47:59  [AGENT ▶ ]  FLIGHT AGENT   Plan a 5 days Maldives honeymoon tri…
+────────────────────────────────────────────────────────────────
+14:47:59  [STATE 📖]  FlightAgent  reading  user_query
+──── Step 1 · LLM → extract IATA codes ─────────────────────────────────────
+14:47:59  [LLM  🧠 ]  Calling gpt-5-nano  → extract IATA codes from query
+14:48:03  [LLM  ✔  ]  IATA extraction complete  (48 chars)
+14:48:03  [RESULT ✦]  IATA codes   Departure=JFK  Arrival=MLE
+──── Step 2 · AviationStack MCP → flight schedule ───────────────────────────
+14:48:03  [MCP  🔧 ]  AviationStack → flight_arrival_departure_schedule
+            {'airport_iata_code': 'JFK', 'schedule_type': 'departure'}
+14:48:03  [SYSTEM  ]  Connecting to AviationStack MCP (stdio/uvx) …
+14:48:04  [RESULT ✦]  AviationStack MCP ready   tools: ['get_flight_status', …]
+14:48:05  [MCP  ✔  ]  AviationStack ← flight_arrival_departure_schedule
+──── Step 3 · LLM → generate flight guidance ────────────────────────────────
+14:48:05  [LLM  🧠 ]  Calling gpt-5-nano  → generate flight recommendations
+14:48:08  [LLM  ✔  ]  flight recommendations complete  (1243 chars)
+14:48:08  [STATE 📝]  FlightAgent  writing  flight_results
+14:48:08  [AGENT ✔ ]  FLIGHT AGENT done   1243 chars written to state
+
+────────────────────────────────────────────────────────────────
+14:48:08  [AGENT ▶ ]  HOTEL AGENT
+────────────────────────────────────────────────────────────────
+14:48:08  [STATE 📖]  HotelAgent  reading  user_query
+14:48:08  [MCP  🔧 ]  Tavily → tavily_search  {'query': 'Best hotels for…'}
+14:48:09  [MCP  ✔  ]  Tavily ← tavily_search  {"results": […]}
+14:48:09  [STATE 📝]  HotelAgent  writing  hotel_results
+14:48:09  [AGENT ✔ ]  HOTEL AGENT done
+
+────────────────────────────────────────────────────────────────
+14:48:09  [AGENT ▶ ]  WEATHER AGENT
+────────────────────────────────────────────────────────────────
+14:48:09  [LLM  🧠 ]  Calling gpt-5-nano  → extract destination city
+14:48:10  [LLM  ✔  ]  destination extraction complete
+14:48:10  [RESULT ✦]  Destination identified   Maldives
+14:48:10  [MCP  🔧 ]  WeatherMCP → get_current_weather  {'city': 'Maldives'}
+14:48:11  [MCP  ✔  ]  WeatherMCP ← get_current_weather
+14:48:11  [MCP  🔧 ]  WeatherMCP → get_forecast  {'city': 'Maldives'}
+14:48:12  [MCP  ✔  ]  WeatherMCP ← get_forecast
+14:48:12  [STATE 📝]  WeatherAgent  writing  weather_results
+14:48:12  [AGENT ✔ ]  WEATHER AGENT done
+
+────────────────────────────────────────────────────────────────
+14:48:12  [AGENT ▶ ]  ITINERARY AGENT
+────────────────────────────────────────────────────────────────
+14:48:12  [STATE 📖]  ItineraryAgent  reading  flight_results
+14:48:12  [STATE 📖]  ItineraryAgent  reading  hotel_results
+14:48:12  [STATE 📖]  ItineraryAgent  reading  weather_results
+14:48:12  [LLM  🧠 ]  Calling gpt-5-nano  → generate day-by-day itinerary
+14:48:16  [LLM  ✔  ]  itinerary generation complete  (2187 chars)
+14:48:16  [STATE 📝]  ItineraryAgent  writing  itinerary
+14:48:16  [AGENT ✔ ]  ITINERARY AGENT done   2187 chars
+
+────────────────────────────────────────────────────────────────
+14:48:16  [AGENT ▶ ]  FINAL AGENT
+────────────────────────────────────────────────────────────────
+14:48:16  [STATE 📖]  FinalAgent  reading  flight_results
+14:48:16  [STATE 📖]  FinalAgent  reading  hotel_results
+14:48:16  [STATE 📖]  FinalAgent  reading  weather_results
+14:48:16  [STATE 📖]  FinalAgent  reading  itinerary
+14:48:16  [LLM  🧠 ]  Calling gpt-5-nano  → format complete travel response
+14:48:21  [LLM  ✔  ]  final response formatting complete  (3456 chars)
+14:48:21  [RESULT ✦]  Final response ready   3456 chars total
+14:48:21  [AGENT ✔ ]  FINAL AGENT done   all sections assembled ✈️ 🏨 🌤️ 🗓️
+
+════════════════════════════════════════════════════════════════
+  ✅ PLAN COMPLETE  ·  Thread: user_a2da006a…  ·  LLM calls: 5
+════════════════════════════════════════════════════════════════
+```
+
+### What the logs reveal about the architecture
+
+- **Agent coordination** — each `[AGENT ▶]` / `[AGENT ✔]` pair shows the hand-off sequence: Flight → Hotel → Weather → Itinerary → Final
+- **LLM calls are explicit** — every `[LLM 🧠]` line shows *why* the LLM is being called (extraction, generation, formatting), not just that it was called
+- **MCP tool calls are traced** — `[MCP 🔧]` shows the exact tool name and arguments sent; `[MCP ✔]` confirms the response came back
+- **State flow is visible** — `[STATE 📖]` / `[STATE 📝]` shows which agent reads and writes which field, making the shared-state pattern concrete
+- **Timing is implicit** — the `HH:MM:SS` prefix on every line lets you see where time is actually spent (MCP round-trips vs LLM latency)
+
+---
+
 ## 🤝 Contributing
 
 1. Fork the repo
