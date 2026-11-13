@@ -164,7 +164,7 @@ TripWise360/
 | **Flight Data** | AviationStack API (`aviationstack-mcp`) |
 | **Web Search** | Tavily Search API (remote MCP) |
 | **Weather Data** | OpenWeatherMap API (custom MCP server) |
-| **Memory / State** | PostgreSQL via `langgraph-checkpoint-postgres` |
+| **Memory / State** | PostgreSQL via `langgraph-checkpoint-postgres` (AWS RDS) |
 | **Frontend** | Vanilla HTML/CSS/JS + Marked.js + html2pdf.js |
 | **Deployment** | Docker |
 
@@ -202,23 +202,38 @@ pip install -r requirements.txt
 
 ### 4. Configure environment variables
 
-Create a `.env` file in the project root:
+Copy the example file and fill in your keys:
+
+```bash
+cp .env.example .env
+```
+
+> ⚠️ `.env` is listed in `.gitignore` and is **never committed**. Use `.env.example` as the reference template.
 
 ```env
 # OpenAI
-OPEN_API_KEY=sk-...
+OPEN_API_KEY=<OpenAI API key>
 
 # AviationStack — https://aviationstack.com (free tier works)
-AVIATIONSTACK_API_KEY=your_key_here
+AVIATIONSTACK_API_KEY=<AviationStack API key>
 
 # Tavily — https://tavily.com (free tier works)
-TAVILY_API_KEY=tvly-...
+TAVILY_API_KEY=<Tavily API key>
 
 # OpenWeatherMap — https://openweathermap.org/api (free tier works)
-OPENWEATHER_API_KEY=your_key_here
+OPENWEATHER_API_KEY=<OpenWeatherMap API key>
 
-# PostgreSQL — Render external DB URL or local
-DATABASE_URL=postgresql://user:password@host:5432/dbname
+# Default origin airport IATA code
+DEFAULT_ORIGIN_IATA=USA
+
+# AWS RDS PostgreSQL (or any PostgreSQL connection string)
+DATABASE_URL=postgresql://<user>:<password>@<host>/<db>
+
+# LangSmith tracing (optional but recommended)
+LANGSMITH_TRACING=true
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_API_KEY=<LangSmith API key>
+LANGSMITH_PROJECT=TripWise360
 ```
 
 ### 5. Run the app
@@ -256,7 +271,7 @@ docker run -p 8000:8000 --env-file .env tripwise360
 | AviationStack | 100 req/month | Flight schedules (`flight_arrival_departure_schedule`) |
 | Tavily | 1,000 req/month | Hotel & travel web search |
 | OpenWeatherMap | 60 calls/min | Current weather + 5-day forecast |
-| Render PostgreSQL | 1 free instance | Conversation memory / checkpointing |
+| AWS RDS PostgreSQL | db.t3.micro free tier | Conversation memory / checkpointing |
 
 > **Note:** `list_airports` and `list_airlines` on AviationStack require the Basic plan. This project uses `flight_arrival_departure_schedule` which is available on the free tier.
 
@@ -274,7 +289,7 @@ MCP decouples the tool implementation from the agent logic. Swapping AviationSta
 OpenWeatherMap doesn't have a published MCP server. `custom_weather_mcp_server.py` wraps it in ~60 lines using `FastMCP`, making it a first-class tool indistinguishable from third-party MCP servers.
 
 **Why PostgreSQL for state?**
-LangGraph's `PostgresSaver` checkpointer persists the full graph state after every node execution. This enables true multi-turn conversations where users can refine their plan across multiple requests using the same `thread_id`.
+LangGraph's `PostgresSaver` checkpointer persists the full graph state after every node execution. This enables true multi-turn conversations where users can refine their plan across multiple requests using the same `thread_id`. This project uses an **AWS RDS PostgreSQL micro instance** as the backing store.
 
 ---
 
