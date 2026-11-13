@@ -2,6 +2,8 @@
 
 A production-ready, multi-agent AI travel planning application built with **LangGraph**, **LangChain**, **FastAPI**, and the **Model Context Protocol (MCP)**. Enter any natural-language travel request and get real-time flights, hotel recommendations, weather forecasts, and a full day-by-day itinerary — all generated autonomously by a team of specialized AI agents.
 
+![TripWise 360 UI](docs/screenshots/ui.png)
+
 ---
 
 ## 🌐 Live Demo
@@ -378,15 +380,19 @@ LangGraph StateGraph                                                          �
 
 TripWise 360 prints richly colored, structured logs to the terminal so you can follow every agent step, LLM call, MCP tool invocation, and state transition in real time — ideal for demos and debugging.
 
-### UI Screenshot
+### UI — Main Interface
 
-![TripWise 360 UI](docs/screenshots/ui.png)
+![TripWise 360 main interface showing a Dubai trip query with results](docs/screenshots/ui.png)
 
-### Log Output — Flight Agent Pipeline
+### UI — Agent Progress Tracker
 
-![Terminal logs showing Flight Agent, LLM calls, AviationStack MCP](docs/screenshots/logs.png)
+The agent progress bar appears while the pipeline is running, showing each agent lighting up in sequence.
 
-> **To add the screenshots:** save your terminal/UI screenshots as `docs/screenshots/ui.png` and `docs/screenshots/logs.png`.
+![Agent progress tracker showing Flights → Hotels → Weather → Itinerary running](docs/screenshots/agent-result.png)
+
+### Terminal — Colored Log Output
+
+![Colored terminal logs: Flight Agent, LLM IATA extraction, AviationStack MCP call](docs/screenshots/logs.png)
 
 ### Log Color Scheme
 
