@@ -1,16 +1,19 @@
-from tools.tavily_tool import tavily_search
-from tools.flight_tool import search_flights
-from backend import run_travel_agent
+import asyncio
+from mcp_client import get_all_tools, aviation_mcp_call
 
-results = search_flights("Plan 7 day trip from India to New york")
-print(results)
 
-user_input = input("Enter travel request: ")
+# async def test_schedule():
+#     """Test flight_arrival_departure_schedule with correct parameter names."""
+#     print("\n--- Testing flight_arrival_departure_schedule (JFK departures) ---")
+#     try:
+#         result = await aviation_mcp_call(
+#             "flight_arrival_departure_schedule",
+#             {"airport_iata_code": "JFK", "schedule_type": "departure"}
+#         )
+#         print(result)
+#     except Exception as e:
+#         print(f"Error: {e}")
 
-response = run_travel_agent(
-    user_input=user_input,
-    thread_id="test_user"
-)
 
-print("\nFINAL RESPONSE:\n")
-print(response["answer"])
+if __name__ == "__main__":
+    asyncio.run(get_all_tools())
