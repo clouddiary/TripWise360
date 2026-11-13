@@ -2,128 +2,157 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>TripMate AI</title>
-
+    <title>TripWise 360 — AI Travel Planner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
-
 <body>
 
-    <div class="page-bg">
-        <div class="gradient-circle circle-1"></div>
-        <div class="gradient-circle circle-2"></div>
-        <div class="gradient-circle circle-3"></div>
+    <div class="bg" aria-hidden="true">
+        <div class="bg-glow g1"></div>
+        <div class="bg-glow g2"></div>
+        <div class="bg-glow g3"></div>
     </div>
 
-    <main class="app-container">
+    <div class="layout">
 
-        <section class="hero-section">
-            <div class="badge">
-                ✈️ TripWise 360 AI — A Multi-Agent Travel Planner with LangGraph & MCP
+        <!-- NAV -->
+        <nav class="nav">
+            <div class="nav-brand">
+                <div class="nav-icon">✈</div>
+                <span>TripWise <b>360</b></span>
+            </div>
+            <div class="nav-status">
+                <span class="dot"></span>AI Online
+            </div>
+        </nav>
+
+        <!-- HERO -->
+        <header class="hero">
+            <div class="hero-badge">🌍 Multi-Agent AI · LangGraph · MCP</div>
+            <h1>Your AI-Powered<br><span>Travel Planner</span></h1>
+            <p>Describe any trip. Get live flights, hotels, weather &amp; a full itinerary in seconds.</p>
+            <div class="feature-row">
+                <div class="feat">✈️<span>Live Flights</span></div>
+                <div class="feat">🏨<span>Hotels</span></div>
+                <div class="feat">🌤️<span>Weather</span></div>
+                <div class="feat">🗓️<span>Itinerary</span></div>
+            </div>
+        </header>
+
+        <!-- INPUT CARD -->
+        <div class="card input-card">
+            <div class="input-card-header">
+                <div class="input-card-title">
+                    <div class="card-icon-wrap">🗺️</div>
+                    <div>
+                        <h2>Where do you want to go?</h2>
+                        <p>Mention destination, duration, budget and preferences</p>
+                    </div>
+                </div>
             </div>
 
-            <h1>
-                Plan Your Perfect Trip with AI
-            </h1>
+            <textarea
+                id="userInput"
+                placeholder="e.g. Plan a 7-day Japan trip from New York with flights, hotels and sightseeing under $5000..."
+            ></textarea>
 
-            <p>
-                Search flights, discover hotels, and generate a complete travel itinerary using a multi-agent LangGraph system.
-            </p>
-        </section>
-
-        <section class="planner-card">
-
-            <div class="card-header">
-                <div>
-                    <h2>Where do you want to go?</h2>
-                    <p>
-                        Example: Plan a complete 7 days Japan trip from Bangladesh under 2 lakhs.
-                    </p>
-                </div>
-
-                <div class="status-pill">
-                    <span class="status-dot"></span>
-                    Online
-                </div>
+            <div class="destinations">
+                <button class="dest-btn" onclick="setPrompt('Plan a complete 7 days Japan trip from New York including flights, hotels and sightseeing under $5000.')">🇯🇵 Japan</button>
+                <button class="dest-btn" onclick="setPrompt('Plan a 5 days Dubai trip from New York with flights, hotels and sightseeing.')">🇦🇪 Dubai</button>
+                <button class="dest-btn" onclick="setPrompt('Plan a 7 days Thailand trip from New York with budget hotels and sightseeing.')">🇹🇭 Thailand</button>
+                <button class="dest-btn" onclick="setPrompt('Plan a 10 days Europe trip from New York covering Paris, Rome and Barcelona.')">🇪🇺 Europe</button>
+                <button class="dest-btn" onclick="setPrompt('Plan a 5 days Maldives honeymoon trip from New York with luxury resorts.')">🏝️ Maldives</button>
             </div>
 
-            <div class="input-area">
-                <textarea
-                    id="userInput"
-                    placeholder="Plan a complete 7 days Japan trip including flights, hotels and sightseeing under 2 lakhs..."
-                ></textarea>
-
+            <div class="input-footer">
+                <span class="kbd-tip">Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send</span>
                 <button id="sendBtn" onclick="sendMessage()">
-                    <span id="btnText">Generate Plan</span>
-                    <span id="btnLoader" class="loader hidden"></span>
+                    <span id="btnText">Generate Plan →</span>
+                    <span id="btnLoader" class="spin hidden"></span>
                 </button>
             </div>
+        </div>
 
-            <div class="quick-prompts">
-                <button onclick="setPrompt('Plan a complete 7 days Japan trip from Bangladesh including flights, hotels and sightseeing under 2 lakhs.')">
-                    Japan Trip
-                </button>
-
-                <button onclick="setPrompt('Plan a 5 days Dubai trip from Dhaka with flights, hotels and sightseeing.')">
-                    Dubai Trip
-                </button>
-
-                <button onclick="setPrompt('Plan a 7 days Thailand trip from Bangladesh with budget hotels and sightseeing.')">
-                    Thailand Trip
-                </button>
-
-                <button onclick="setPrompt('Give me all country flight info.')">
-                    Global Flights
-                </button>
+        <!-- AGENT PROGRESS -->
+        <div id="thinkingBox" class="agent-box hidden">
+            <div class="agent-header">
+                <div class="pulse-ring"></div>
+                <span>AI agents working on your plan…</span>
             </div>
+            <div class="agent-row">
+                <div class="agent" id="step-flight">
+                    <div class="agent-ico">✈️</div>
+                    <div class="agent-lbl">Flights</div>
+                    <div class="agent-track"><div class="agent-prog"></div></div>
+                </div>
+                <div class="agent-arrow">›</div>
+                <div class="agent" id="step-hotel">
+                    <div class="agent-ico">🏨</div>
+                    <div class="agent-lbl">Hotels</div>
+                    <div class="agent-track"><div class="agent-prog"></div></div>
+                </div>
+                <div class="agent-arrow">›</div>
+                <div class="agent" id="step-weather">
+                    <div class="agent-ico">🌤️</div>
+                    <div class="agent-lbl">Weather</div>
+                    <div class="agent-track"><div class="agent-prog"></div></div>
+                </div>
+                <div class="agent-arrow">›</div>
+                <div class="agent" id="step-itinerary">
+                    <div class="agent-ico">📋</div>
+                    <div class="agent-lbl">Itinerary</div>
+                    <div class="agent-track"><div class="agent-prog"></div></div>
+                </div>
+            </div>
+        </div>
 
-        </section>
-
-        <section id="resultSection" class="result-section hidden">
-
+        <!-- RESULT -->
+        <div id="resultSection" class="card result-card hidden">
             <div class="result-header">
-                <div>
-                    <h2>Your AI Travel Plan</h2>
-                    <p id="threadInfo">Thread ID: -</p>
+                <div class="result-title-row">
+                    <div class="result-icon-wrap">🎯</div>
+                    <div>
+                        <h2>Your AI Travel Plan</h2>
+                        <div id="threadInfo" class="thread-id">—</div>
+                    </div>
                 </div>
-
                 <div class="result-actions">
-                    <button class="copy-btn" onclick="copyResult()">
-                        Copy
-                    </button>
-
-                    <button class="download-btn" onclick="downloadPDF()">
-                        Download PDF
-                    </button>
+                    <button class="btn-action btn-copy" onclick="copyResult()">📋 Copy</button>
+                    <button class="btn-action btn-dl" onclick="downloadPDF()">⬇️ PDF</button>
                 </div>
             </div>
 
-            <div id="pdfContent" class="pdf-content">
-                <h1 class="pdf-title">AI Travel Plan</h1>
-                <div id="resultBox" class="result-box"></div>
+            <div class="tab-bar" id="resultTabs">
+                <button class="tab active" data-tab="full">📄 Full Plan</button>
+                <button class="tab" data-tab="flights">✈️ Flights</button>
+                <button class="tab" data-tab="hotels">🏨 Hotels</button>
+                <button class="tab" data-tab="itinerary">🗓️ Itinerary</button>
             </div>
 
-        </section>
+            <div id="pdfContent" class="pdf-wrap">
+                <h1 class="pdf-title">AI Travel Plan — TripWise 360</h1>
+                <div id="resultBox"    class="panel active" data-panel="full"></div>
+                <div id="flightBox"    class="panel" data-panel="flights"></div>
+                <div id="hotelBox"     class="panel" data-panel="hotels"></div>
+                <div id="itineraryBox" class="panel" data-panel="itinerary"></div>
+            </div>
+        </div>
 
-        <section id="errorBox" class="error-box hidden"></section>
+        <!-- ERROR -->
+        <div id="errorBox" class="err hidden">
+            ⚠️ <span id="errorMsg"></span>
+        </div>
 
-    </main>
+        <footer>TripWise 360 &nbsp;·&nbsp; FastAPI · LangGraph · OpenAI · PostgreSQL · Tavily · AviationStack</footer>
 
-    <footer>
-        Built with FastAPI, LangGraph, Open Api, PostgreSQL, Tavily and AviationStack
-    </footer>
+    </div>
 
-    <!-- Markdown Renderer -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-
-    <!-- PDF Download Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-
-    <!-- Your Custom JS -->
     <script src="/static/script.js"></script>
-
 </body>
 </html>
