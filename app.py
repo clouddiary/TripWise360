@@ -3,12 +3,13 @@ import traceback
 import uvicorn
 
 from fastapi import FastAPI, Request
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from backend import run_travel_agent, resume_travel_agent, get_travel_progress
 
-from backend import run_travel_agent
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -35,8 +36,13 @@ templates = Jinja2Templates(
 class TravelRequest(BaseModel):
     message: str
     thread_id: str | None = None
+    run_id: str | None = None
 
 
+class ApprovalRequest(BaseModel):
+    thread_id: str = Field(min_length=1)
+    approved: bool
+    feedback: str = ""
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -57,46 +63,91 @@ async def travel_planner(request_data: TravelRequest):
                 status_code=400,
                 content={
                     "success": False,
-                    "error": "Message cannot be empty."
-                }
+                    "error": "Message cannot be empty.",
+                },
             )
 
-        result = run_travel_agent(
+        result = await run_in_threadpool(
+            run_travel_agent,
             user_input=user_message,
-            thread_id=request_data.thread_id
+            thread_id=request_data.thread_id,
+            run_id=request_data.run_id,
         )
 
         return JSONResponse(
             content={
                 "success": True,
-                "thread_id": result["thread_id"],
-                "answer": result["answer"],
-                "flight_results": result["flight_results"],
-                "hotel_results": result["hotel_results"],
-                "itinerary": result["itinerary"],
-                "llm_calls": result["llm_calls"],
+                **result,
             }
         )
 
-    except Exception as e:
-        print("ERROR:", e)
+    except Exception as exc:
+        print("ERROR:", exc)
         traceback.print_exc()
 
         return JSONResponse(
             status_code=500,
             content={
                 "success": False,
-                "error": str(e)
+                "error": str(exc),
+            },
+        )
+
+
+@app.post("/api/travel/approve")
+async def approve_travel_plan(request_data: ApprovalRequest):
+    try:
+        if not request_data.approved and not request_data.feedback.strip():
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "error": "Please provide revision feedback when rejecting the draft.",
+                },
+            )
+
+        result = await run_in_threadpool(
+            resume_travel_agent,
+            thread_id=request_data.thread_id,
+            approved=request_data.approved,
+            feedback=request_data.feedback,
+        )
+
+        return JSONResponse(
+            content={
+                "success": True,
+                **result,
             }
         )
 
+    except Exception as exc:
+        print("APPROVAL ERROR:", exc)
+        traceback.print_exc()
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": str(exc),
+            },
+        )
+
+
+@app.get("/api/travel/progress/{thread_id}")
+async def travel_progress(thread_id: str, run_id: str | None = None):
+    return await run_in_threadpool(get_travel_progress, thread_id, run_id)
 
 
 @app.get("/health")
 async def health_check():
     return {
         "status": "ok",
-        "message": "AI Travel Planner API is running"
+        "message": "TripMate AI API is running",
+        "features": [
+            "supervisor_agent",
+            "input_guardrail",
+            "human_in_the_loop",
+        ],
     }
 
 
@@ -105,11 +156,10 @@ async def favicon():
     return JSONResponse(content={})
 
 
-
 if __name__ == "__main__":
     uvicorn.run(
         "app:app",
         host="127.0.0.1",
         port=8000,
-        reload=True
+        reload=True,
     )

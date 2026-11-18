@@ -1,4 +1,5 @@
 import os
+import json
 import certifi
 from dotenv import load_dotenv
 
@@ -7,7 +8,7 @@ load_dotenv()
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
-from typing import TypedDict, Annotated
+from typing import Any, TypedDict, Annotated
 import operator
 import uuid
 import asyncio
@@ -17,6 +18,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import Command, interrupt
 from langgraph.checkpoint.postgres import PostgresSaver
 from langchain_core.messages import (
     AnyMessage,
@@ -25,7 +27,12 @@ from langchain_core.messages import (
     SystemMessage,
 )
 
-from mcp_client import tavily_mcp_search, aviation_mcp_call, forecast_mcp_search, weather_mcp_search
+from mcp_client import (
+    tavily_mcp_search,
+    aviation_mcp_call,
+    forecast_mcp_search,
+    weather_mcp_search
+)
 from langchain_openai import ChatOpenAI
 from logger import (
     log_system, log_agent_start, log_agent_done,
@@ -99,16 +106,311 @@ log_system("LLM ready ✔")
 # =========================
 # State
 # =========================
+class TravelState(TypedDict, total=False):
+    messages: Annotated[list[AnyMessage], operator.add]
+    user_query: str
+    run_id: str
 
-class TravelState(TypedDict):
-    messages:        Annotated[list[AnyMessage], operator.add]
-    user_query:      str
-    flight_results:  str
-    hotel_results:   str
-    itinerary:       str
-    llm_calls:       int
+    # Supervisor + guardrail state
+    guardrail_allowed: bool
+    guardrail_reason: str
+    selected_agents: list[str]
+    trip_constraints: dict[str, Any]
+    supervisor_reasoning: str
+
+    # Original specialist results
+    flight_results: str
+    hotel_results: str
     weather_results: str
+    itinerary: str
 
+    # New budget + HITL state
+    budget_results: str
+    approval_request: str
+    approved: bool
+    human_feedback: str
+    final_response: str
+
+    llm_calls: int
+
+
+# =========================
+# Shared helpers
+# =========================
+KNOWN_AGENTS = {
+    "flight_agent",
+    "hotel_agent",
+    "weather_agent",
+    "budget_agent",
+    "itinerary_agent",
+}
+
+AGENT_ORDER = [
+    "flight_agent",
+    "hotel_agent",
+    "weather_agent",
+    "budget_agent",
+    "itinerary_agent",
+]
+
+
+def log_available_state(agent: str, state: TravelState, fields):
+    """Log only populated inputs; empty research fields belong to skipped agents."""
+    for field in fields:
+        if state.get(field) not in (None, "", [], {}):
+            log_state_read(agent, field)
+
+
+def _llm_text(system_prompt: str, user_prompt: str) -> str:
+    response = llm.invoke(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+    )
+    return str(response.content)
+
+
+def _json_from_llm(text: str) -> dict[str, Any]:
+    """Extract the first complete JSON object returned by the model."""
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("The model did not return a JSON object.")
+
+    return json.loads(text[start : end + 1])
+
+
+def _empty_constraints() -> dict[str, Any]:
+    return {
+        "destination": "",
+        "origin": "",
+        "duration": "",
+        "budget": "",
+        "travel_style": "",
+        "special_preferences": [],
+    }
+
+
+
+# =========================
+# Shared helpers
+# =========================
+KNOWN_AGENTS = {
+    "flight_agent",
+    "hotel_agent",
+    "weather_agent",
+    "budget_agent",
+    "itinerary_agent",
+}
+
+AGENT_ORDER = [
+    "flight_agent",
+    "hotel_agent",
+    "weather_agent",
+    "budget_agent",
+    "itinerary_agent",
+]
+
+
+def _llm_text(system_prompt: str, user_prompt: str) -> str:
+    response = llm.invoke(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+    )
+    return str(response.content)
+
+
+def _json_from_llm(text: str) -> dict[str, Any]:
+    """Extract the first complete JSON object returned by the model."""
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("The model did not return a JSON object.")
+
+    return json.loads(text[start : end + 1])
+
+
+def _empty_constraints() -> dict[str, Any]:
+    return {
+        "destination": "",
+        "origin": "",
+        "duration": "",
+        "budget": "",
+        "travel_style": "",
+        "special_preferences": [],
+    }
+
+
+# =========================
+# Supervisor Agent + Input Guardrail
+# =========================
+def supervisor_agent(state: TravelState):
+    log_agent_start("Supervisor", state["user_query"])
+    log_state_read("Supervisor", "user_query")
+    query = state["user_query"]
+    llm_calls = state.get("llm_calls", 0)
+
+    guardrail_prompt = f"""
+Determine whether the following request belongs to travel planning or travel
+information. Valid requests can include destinations, flights, hotels, weather,
+budgets, visas, transportation, sightseeing, food, packing, or itineraries.
+
+Block clearly unrelated requests and requests asking for harmful or illegal
+instructions. Do not block a valid travel request merely because some details
+are missing.
+
+Return strict JSON only:
+{{
+  "allowed": true,
+  "reason": ""
+}}
+
+User request:
+{query}
+"""
+
+    # Fail open on parser/model errors so a temporary JSON-format issue does not
+    # break the original travel-planning behavior.
+    try:
+        log_llm_call("validate travel input guardrail")
+        guardrail_raw = _llm_text(
+            "You are the input guardrail for a travel-planning application. "
+            "Return strict JSON only.",
+            guardrail_prompt,
+        )
+        log_llm_done("input guardrail", len(guardrail_raw))
+        guardrail_result = _json_from_llm(guardrail_raw)
+        allowed = bool(guardrail_result.get("allowed", True))
+        guardrail_reason = str(guardrail_result.get("reason", "")).strip()
+        llm_calls += 1
+    except Exception as exc:
+        log_error("Input guardrail fallback", str(exc))
+        allowed = True
+        guardrail_reason = "Guardrail validation fallback allowed the request."
+
+    log_result("Guardrail decision", "Allowed" if allowed else "Blocked")
+    log_state_write("Supervisor", "guardrail_allowed", str(allowed))
+    if not allowed:
+        reason = guardrail_reason or (
+            "TripMate AI can only help with travel-planning requests. "
+            "Please ask about a destination, flight, hotel, weather, budget, "
+            "or itinerary."
+        )
+        log_state_write("Supervisor", "guardrail_reason", reason)
+        log_agent_done("Supervisor", "request blocked; specialist agents skipped")
+        return {
+            "guardrail_allowed": False,
+            "guardrail_reason": reason,
+            "selected_agents": [],
+            "trip_constraints": _empty_constraints(),
+            "supervisor_reasoning": reason,
+            "final_response": reason,
+            "messages": [AIMessage(content=f"Guardrail blocked request: {reason}")],
+            "llm_calls": llm_calls,
+        }
+
+    supervisor_prompt = f"""
+You are the supervisor of a multi-agent travel-planning system.
+Choose only the specialist agents needed for the request.
+Do not select weather_agent for a general trip, road trip, or packing request
+unless the user explicitly asks about weather, climate, temperature, or forecasts.
+
+Available agents:
+- flight_agent: flights, airports, airlines, routes, airfare, or booking advice
+- hotel_agent: hotels, accommodation, neighborhoods, or places to stay
+- weather_agent: weather or forecast research, only when explicitly requested
+- budget_agent: cost, affordability, price limits, or budget feasibility
+- itinerary_agent: creates the integrated travel plan and must always be included
+
+Return strict JSON only using this schema:
+{{
+  "selected_agents": ["flight_agent", "hotel_agent", "weather_agent", "budget_agent", "itinerary_agent"],
+  "trip_constraints": {{
+    "destination": "",
+    "origin": "",
+    "duration": "",
+    "budget": "",
+    "travel_style": "",
+    "special_preferences": []
+  }},
+  "reasoning": ""
+}}
+
+User request:
+{query}
+"""
+
+    try:
+        log_llm_call("select specialists and extract trip constraints")
+        supervisor_raw = _llm_text(
+            "You route work to travel specialist agents. Return strict JSON only.",
+            supervisor_prompt,
+        )
+        log_llm_done("supervisor planning", len(supervisor_raw))
+        parsed = _json_from_llm(supervisor_raw)
+        requested_agents = parsed.get("selected_agents", [])
+        selected_agents = [
+            name for name in AGENT_ORDER
+            if name in requested_agents and name in KNOWN_AGENTS
+        ]
+
+        # The itinerary agent integrates whichever specialist results were selected.
+        if "itinerary_agent" not in selected_agents:
+            selected_agents.append("itinerary_agent")
+
+        constraints = _empty_constraints()
+        parsed_constraints = parsed.get("trip_constraints", {})
+        if isinstance(parsed_constraints, dict):
+            constraints.update(parsed_constraints)
+
+        reasoning = str(parsed.get("reasoning", "")).strip()
+        llm_calls += 1
+    except Exception as exc:
+        log_error("Supervisor planning fallback", str(exc))
+        # Original workflow behavior is preserved as the fallback.
+        selected_agents = [name for name in AGENT_ORDER if name != "weather_agent"]
+        constraints = _empty_constraints()
+        reasoning = (
+            "Supervisor parsing failed, so the original full travel workflow "
+            "was selected as a safe fallback."
+        )
+
+    log_result("Selected agents", ", ".join(selected_agents))
+    log_state_write("Supervisor", "selected_agents", ", ".join(selected_agents))
+    log_state_write("Supervisor", "trip_constraints", str(constraints))
+    log_state_write("Supervisor", "supervisor_reasoning", reasoning)
+    log_agent_done("Supervisor", "agent plan ready")
+    return {
+        "guardrail_allowed": True,
+        "guardrail_reason": guardrail_reason,
+        "selected_agents": selected_agents,
+        "trip_constraints": constraints,
+        "supervisor_reasoning": reasoning,
+        "messages": [AIMessage(content="Supervisor created the agent plan.")],
+        "llm_calls": llm_calls,
+    }
+
+
+# =========================
+# Guardrail blocked response
+# =========================
+def guardrail_blocked_agent(state: TravelState):
+    log_agent_start("Guardrail Blocked")
+    log_state_read("GuardrailBlocked", "guardrail_reason")
+    reason = state.get("final_response") or state.get("guardrail_reason") or (
+        "This request was blocked by the travel input guardrail."
+    )
+    log_state_write("GuardrailBlocked", "final_response", reason)
+    log_agent_done("Guardrail Blocked", "returning blocked response")
+    return {
+        "final_response": reason,
+        "messages": [AIMessage(content=reason)],
+    }
 
 # =========================
 # Prompts
@@ -345,6 +647,57 @@ def weather_agent(state: TravelState):
         "messages":        [AIMessage(content="Weather information fetched")],
     }
 
+# =========================
+# Budget Agent - new specialist
+# =========================
+def budget_agent(state: TravelState):
+    log_agent_start("Budget Agent", state["user_query"])
+    for field in ("user_query", "trip_constraints", "flight_results", "hotel_results", "weather_results"):
+        log_available_state("BudgetAgent", state, (field,))
+    prompt = f"""
+Analyze whether this trip is realistic for the user's budget.
+
+User Query:
+{state['user_query']}
+
+Trip Constraints:
+{state.get('trip_constraints', {})}
+
+Flight Results:
+{state.get('flight_results', '')}
+
+Hotel Results:
+{state.get('hotel_results', '')}
+
+Weather Results:
+{state.get('weather_results', '')}
+
+Return:
+1. Estimated cost categories
+2. Budget risk areas
+3. Money-saving suggestions
+4. Overall feasibility
+
+If exact live prices are unavailable, clearly label estimates as approximate.
+"""
+
+    log_llm_call("assess travel budget and feasibility")
+    response = llm.invoke(
+        [
+            SystemMessage(content="You are a practical travel budget analyst."),
+            HumanMessage(content=prompt),
+        ]
+    )
+
+    log_llm_done("budget assessment", len(response.content))
+    log_state_write("BudgetAgent", "budget_results", response.content[:80])
+    log_agent_done("Budget Agent", f"{len(response.content)} chars")
+    return {
+        "budget_results": response.content,
+        "messages": [AIMessage(content="Budget assessment generated.")],
+        "llm_calls": state.get("llm_calls", 0) + 1,
+    }
+
 
 # =========================
 # 🗓️  Itinerary Agent
@@ -353,9 +706,9 @@ def weather_agent(state: TravelState):
 def itinerary_agent(state: TravelState):
     log_agent_start("Itinerary Agent", state["user_query"])
 
-    log_state_read("ItineraryAgent", "flight_results")
-    log_state_read("ItineraryAgent", "hotel_results")
-    log_state_read("ItineraryAgent", "weather_results")
+    log_available_state("ItineraryAgent", state, (
+        "user_query", "flight_results", "hotel_results", "weather_results", "budget_results"
+    ))
 
     prompt = f"""
 Create a complete travel itinerary.
@@ -372,6 +725,9 @@ Hotel Results:
 Weather Results:
 {state['weather_results']}
 
+Budget Results:
+{state.get('budget_results', '')}
+
 Make the itinerary practical, budget-aware, and easy to follow.
 """
 
@@ -381,6 +737,12 @@ Make the itinerary practical, budget-aware, and easy to follow.
         SystemMessage(content="You are an expert travel planner."),
         HumanMessage(content=prompt)
     ])
+
+    approval_request = (
+        "Please review the generated draft itinerary. Approve it to create the "
+        "final polished plan, or provide feedback for revision."
+    )
+
     log_llm_done("itinerary generation", len(response.content))
 
     log_state_write("ItineraryAgent", "itinerary", response.content[:80])
@@ -388,40 +750,93 @@ Make the itinerary practical, budget-aware, and easy to follow.
 
     return {
         "itinerary": response.content,
+        "approval_request": approval_request,
         "messages":  [response],
         "llm_calls": state.get("llm_calls", 0) + 1,
     }
 
+# =========================
+# Human-in-the-Loop approval
+# =========================
+def human_approval_agent(state: TravelState):
+    log_agent_start("Human Approval")
+    log_state_read("HumanApproval", "itinerary")
+    log_system("HITL checkpoint reached: awaiting human review (node replays on resume).")
+    # Do not wrap interrupt() in try/except. LangGraph uses it to pause execution.
+    review = interrupt(
+        {
+            "question": "Do you approve this itinerary?",
+            "draft_itinerary": state.get("itinerary", ""),
+            "approval_request": state.get("approval_request", ""),
+            "selected_agents": state.get("selected_agents", []),
+            "supervisor_reasoning": state.get("supervisor_reasoning", ""),
+            "expected_response": {
+                "approved": True,
+                "feedback": "Optional revision feedback",
+            },
+        }
+    )
+
+    approved = bool(review.get("approved", False))
+    human_feedback = str(review.get("feedback", "")).strip()
+
+    log_result("Human review received", "Approved" if approved else "Revision requested")
+    log_state_write("HumanApproval", "approved", str(approved))
+    log_state_write("HumanApproval", "human_feedback", f"{len(human_feedback)} chars")
+    log_agent_done("Human Approval", "continuing to final agent")
+    return {
+        "approved": approved,
+        "human_feedback": human_feedback,
+        "messages": [AIMessage(content="Human approval step completed.")],
+    }
+
+
+
+
 
 # =========================
-# 🏆  Final Agent
+# Final Response Agent - original format kept, HITL feedback added
 # =========================
-
 def final_agent(state: TravelState):
-    log_agent_start("Final Agent", "formatting complete travel response")
-
-    log_state_read("FinalAgent", "flight_results")
-    log_state_read("FinalAgent", "hotel_results")
-    log_state_read("FinalAgent", "weather_results")
-    log_state_read("FinalAgent", "itinerary")
+    log_agent_start("Final Agent", "applying human review and formatting response")
+    for field in ("approved", "human_feedback", "trip_constraints", "flight_results", "hotel_results", "weather_results", "budget_results", "itinerary"):
+        log_available_state("FinalAgent", state, (field,))
+    if state.get("approved", False):
+        review_instruction = (
+            "The user approved the draft. Preserve its decisions while polishing it."
+        )
+    else:
+        review_instruction = f"""
+The user requested a revision. Apply this feedback carefully:
+{state.get('human_feedback', '') or 'Improve the draft before finalizing it.'}
+"""
 
     final_prompt = f"""
 Generate the final travel response for the user.
 
+Human Review:
+{review_instruction}
+
 User Request:
 {state['user_query']}
 
+Supervisor Constraints:
+{state.get('trip_constraints', {})}
+
 Flights:
-{state['flight_results']}
+{state.get('flight_results', '')}
 
 Hotels:
-{state['hotel_results']}
+{state.get('hotel_results', '')}
 
 Weather:
-{state['weather_results']}
+{state.get('weather_results', '')}
 
-Itinerary:
-{state['itinerary']}
+Budget Analysis:
+{state.get('budget_results', '')}
+
+Draft Itinerary:
+{state.get('itinerary', '')}
 
 Format the final answer beautifully using these sections:
 1. Trip Summary
@@ -434,27 +849,74 @@ Format the final answer beautifully using these sections:
 
 Important:
 - Be clear and practical.
-- Mention that live flight API may not provide ticket prices if pricing is unavailable.
+- Mention that live flight APIs may not provide ticket prices when pricing is unavailable.
 - Include weather-based travel advice.
 - Keep the response useful for real travel planning.
+- Incorporate the human feedback when revision was requested.
 """
 
-    log_divider("LLM → format final travel response")
-    log_llm_call("format complete travel response")
-    response = llm.invoke([
-        SystemMessage(content="You are a professional AI travel booking assistant."),
-        HumanMessage(content=final_prompt)
-    ])
+    log_llm_call("format final travel response with human review")
+    response = llm.invoke(
+        [
+            SystemMessage(
+                content="You are a professional AI travel booking assistant."
+            ),
+            HumanMessage(content=final_prompt),
+        ]
+    )
+
     log_llm_done("final response formatting", len(response.content))
-    log_result("Final response ready", f"{len(response.content)} chars total")
-
-    log_agent_done("Final Agent", "all sections assembled ✈️ 🏨 🌤️ 🗓️")
-
+    log_state_write("FinalAgent", "final_response", response.content[:80])
+    log_agent_done("Final Agent", f"{len(response.content)} chars")
     return {
-        "messages":  [response],
+        "final_response": response.content,
+        "messages": [response],
         "llm_calls": state.get("llm_calls", 0) + 1,
     }
 
+# =========================
+# Dynamic Supervisor Routing
+# =========================
+ROUTE_MAP = {
+    "guardrail_blocked": "guardrail_blocked",
+    "flight_agent": "flight_agent",
+    "hotel_agent": "hotel_agent",
+    "weather_agent": "weather_agent",
+    "budget_agent": "budget_agent",
+    "itinerary_agent": "itinerary_agent",
+}
+
+
+def _selected_agents(state: TravelState) -> list[str]:
+    selected = state.get("selected_agents", [])
+    return [agent for agent in AGENT_ORDER if agent in selected]
+
+
+def route_from_supervisor(state: TravelState) -> str:
+    if not state.get("guardrail_allowed", True):
+        log_system("Routing: supervisor → guardrail_blocked")
+        return "guardrail_blocked"
+
+    selected = _selected_agents(state)
+    target = selected[0] if selected else "itinerary_agent"
+    log_system(f"Routing: supervisor → {target}")
+    return target
+
+
+def route_after_agent(current_agent: str):
+    def route(state: TravelState) -> str:
+        selected = _selected_agents(state)
+        current_index = AGENT_ORDER.index(current_agent)
+
+        for next_agent in AGENT_ORDER[current_index + 1 :]:
+            if next_agent in selected:
+                log_system(f"Routing: {current_agent} → {next_agent}")
+                return next_agent
+
+        log_system(f"Routing: {current_agent} → itinerary_agent")
+        return "itinerary_agent"
+
+    return route
 
 # =========================
 # Build Graph
@@ -464,20 +926,38 @@ log_system("Building LangGraph StateGraph …")
 
 graph = StateGraph(TravelState)
 
-graph.add_node("flight_agent",    flight_agent)
-graph.add_node("hotel_agent",     hotel_agent)
-graph.add_node("weather_agent",   weather_agent)
+graph.add_node("supervisor", supervisor_agent)
+graph.add_node("guardrail_blocked", guardrail_blocked_agent)
+graph.add_node("flight_agent", flight_agent)
+graph.add_node("hotel_agent", hotel_agent)
+graph.add_node("weather_agent", weather_agent)
+graph.add_node("budget_agent", budget_agent)
 graph.add_node("itinerary_agent", itinerary_agent)
-graph.add_node("final_agent",     final_agent)
+graph.add_node("human_approval", human_approval_agent)
+graph.add_node("final_agent", final_agent)
 
-graph.add_edge(START,             "flight_agent")
-graph.add_edge("flight_agent",    "hotel_agent")
-graph.add_edge("hotel_agent",     "weather_agent")
-graph.add_edge("weather_agent",   "itinerary_agent")
-graph.add_edge("itinerary_agent", "final_agent")
-graph.add_edge("final_agent",      END)
+graph.add_edge(START, "supervisor")
+graph.add_conditional_edges("supervisor", route_from_supervisor, ROUTE_MAP)
 
-log_system("Graph edges: START → flight → hotel → weather → itinerary → final → END")
+graph.add_conditional_edges(
+    "flight_agent", route_after_agent("flight_agent"), ROUTE_MAP
+)
+graph.add_conditional_edges(
+    "hotel_agent", route_after_agent("hotel_agent"), ROUTE_MAP
+)
+graph.add_conditional_edges(
+    "weather_agent", route_after_agent("weather_agent"), ROUTE_MAP
+)
+graph.add_conditional_edges(
+    "budget_agent", route_after_agent("budget_agent"), ROUTE_MAP
+)
+
+graph.add_edge("itinerary_agent", "human_approval")
+graph.add_edge("human_approval", "final_agent")
+graph.add_edge("final_agent", END)
+graph.add_edge("guardrail_blocked", END)
+
+log_system("Graph: supervisor → selected specialists → itinerary → human approval → final; blocked requests → END")
 
 
 # =========================
@@ -508,38 +988,153 @@ log_system("LangGraph compiled — TripWise 360 is ready 🌍\n")
 # Entry point for FastAPI
 # =========================
 
-def run_travel_agent(user_input: str, thread_id: str | None = None):
+# =========================
+# FastAPI-facing helpers
+# =========================
+def _interrupt_payload(result: dict[str, Any]) -> dict[str, Any] | None:
+    interrupts = result.get("__interrupt__", [])
+    if not interrupts:
+        return None
+
+    first_interrupt = interrupts[0]
+    payload = getattr(first_interrupt, "value", first_interrupt)
+    return payload if isinstance(payload, dict) else {"value": payload}
+
+
+def _serialize_result(
+    result: dict[str, Any],
+    thread_id: str,
+) -> dict[str, Any]:
+    messages = result.get("messages", [])
+    last_message = messages[-1].content if messages else ""
+    answer = result.get("final_response") or last_message
+    interrupt_payload = _interrupt_payload(result)
+
+    if interrupt_payload is not None:
+        log_system(f"Graph paused for human approval · Thread: {thread_id}")
+    elif not result.get("guardrail_allowed", True):
+        log_system(f"Graph stopped by input guardrail · Thread: {thread_id}")
+    else:
+        log_graph_done(thread_id, result.get("llm_calls", 0))
+
+    if interrupt_payload:
+        answer = interrupt_payload.get("draft_itinerary") or result.get(
+            "itinerary", ""
+        )
+
+    return {
+        "thread_id": thread_id,
+        "answer": answer,
+        "requires_approval": interrupt_payload is not None,
+        "approval_request": (
+            interrupt_payload.get("approval_request", "")
+            if interrupt_payload
+            else result.get("approval_request", "")
+        ),
+        "flight_results": result.get("flight_results", ""),
+        "hotel_results": result.get("hotel_results", ""),
+        "weather_results": result.get("weather_results", ""),
+        "budget_results": result.get("budget_results", ""),
+        "itinerary": (
+            interrupt_payload.get("draft_itinerary", "")
+            if interrupt_payload
+            else result.get("itinerary", "")
+        ),
+        "selected_agents": result.get("selected_agents", []),
+        "trip_constraints": result.get("trip_constraints", {}),
+        "supervisor_reasoning": result.get("supervisor_reasoning", ""),
+        "guardrail_allowed": result.get("guardrail_allowed", True),
+        "guardrail_reason": result.get("guardrail_reason", ""),
+        "approved": result.get("approved"),
+        "human_feedback": result.get("human_feedback", ""),
+        "llm_calls": result.get("llm_calls", 0),
+    }
+
+
+
+def run_travel_agent(user_input: str, thread_id: str | None = None, run_id: str | None = None):
+    """Start a new travel-planning run and pause at human approval."""
     if not thread_id:
         thread_id = f"user_{uuid.uuid4().hex}"
 
     log_graph_start(user_input, thread_id)
-
     config = {"configurable": {"thread_id": thread_id}}
 
     result = travel_graph.invoke(
         {
-            "messages":        [HumanMessage(content=user_input)],
-            "user_query":      user_input,
-            "flight_results":  "",
-            "hotel_results":   "",
+            "messages": [HumanMessage(content=user_input)],
+            "user_query": user_input,
+            "run_id": run_id or uuid.uuid4().hex,
+            "guardrail_allowed": True,
+            "guardrail_reason": "",
+            "selected_agents": [],
+            "trip_constraints": _empty_constraints(),
+            "supervisor_reasoning": "",
+            "flight_results": "",
+            "hotel_results": "",
             "weather_results": "",
-            "itinerary":       "",
-            "llm_calls":       0,
+            "budget_results": "",
+            "itinerary": "",
+            "approval_request": "",
+            "approved": False,
+            "human_feedback": "",
+            "final_response": "",
+            "llm_calls": 0,
         },
         config=config,
     )
 
-    llm_calls    = result.get("llm_calls", 0)
-    final_answer = result["messages"][-1].content
+    return _serialize_result(result, thread_id)
 
-    log_graph_done(thread_id, llm_calls)
 
-    return {
-        "thread_id":      thread_id,
-        "answer":         final_answer,
-        "flight_results": result.get("flight_results", ""),
-        "hotel_results":  result.get("hotel_results", ""),
-        "weather_results":result.get("weather_results", ""),
-        "itinerary":      result.get("itinerary", ""),
-        "llm_calls":      llm_calls,
+def resume_travel_agent(
+    thread_id: str,
+    approved: bool,
+    feedback: str = "",
+):
+    """Resume the paused LangGraph thread after human review."""
+    if not thread_id:
+        log_error("HITL resume", "thread_id is missing")
+        raise ValueError("thread_id is required to resume a travel plan.")
+
+    log_system(f"Resuming human review · Thread: {thread_id} · Approved: {approved} · Feedback: {len(feedback.strip())} chars")
+    config = {"configurable": {"thread_id": thread_id}}
+    result = travel_graph.invoke(
+        Command(
+            resume={
+                "approved": approved,
+                "feedback": feedback.strip(),
+            }
+        ),
+        config=config,
+    )
+
+    return _serialize_result(result, thread_id)
+
+
+def get_travel_progress(thread_id: str, run_id: str | None = None):
+    """Describe execution from persisted graph checkpoints, not UI timers."""
+    snapshot = travel_graph.get_state({"configurable": {"thread_id": thread_id}})
+    state = snapshot.values or {}
+    if not state or (run_id and state.get("run_id") != run_id):
+        return {"agents": [{"name": "supervisor", "status": "running"}]}
+
+    next_nodes = set(snapshot.next)
+    interrupted = any(getattr(task, "interrupts", ()) for task in snapshot.tasks)
+    selected = _selected_agents(state)
+    agents = [{"name": "supervisor", "status": "running" if "supervisor" in next_nodes else "completed"}]
+    fields = {
+        "flight_agent": "flight_results", "hotel_agent": "hotel_results",
+        "weather_agent": "weather_results", "budget_agent": "budget_results",
+        "itinerary_agent": "itinerary",
     }
+    if not state.get("guardrail_allowed", True):
+        agents.append({"name": "guardrail_blocked", "status": "blocked"})
+    else:
+        for name in selected:
+            status = "completed" if state.get(fields[name]) else "running" if name in next_nodes else "queued"
+            agents.append({"name": name, "status": status})
+        review_status = "waiting" if interrupted else "completed" if state.get("human_feedback") or state.get("approved") or state.get("final_response") else "queued"
+        agents.append({"name": "human_approval", "status": review_status})
+        agents.append({"name": "final_agent", "status": "completed" if state.get("final_response") else "running" if "final_agent" in next_nodes else "queued"})
+    return {"agents": agents, "reason": state.get("supervisor_reasoning", "")}

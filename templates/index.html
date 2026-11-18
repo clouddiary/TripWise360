@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=workspace-2">
 </head>
 <body>
 
@@ -33,12 +33,13 @@
         <!-- HERO -->
         <header class="hero">
             <div class="hero-badge">🌍 Multi-Agent AI · LangGraph · MCP</div>
-            <h1>Your AI-Powered<br><span>Travel Planner</span></h1>
-            <p>Describe any trip. Get live flights, hotels, weather &amp; a full itinerary in seconds.</p>
+            <h1>Your AI-Powered<br> <span>Travel Planner</span></h1>
+            <p>Describe your trip, follow the selected agents, and review your draft before finalizing.</p>
             <div class="feature-row">
-                <div class="feat">✈️<span>Live Flights</span></div>
+                <div class="feat">✈️<span>Flight guidance</span></div>
                 <div class="feat">🏨<span>Hotels</span></div>
                 <div class="feat">🌤️<span>Weather</span></div>
+                <div class="feat">💰<span>Budget</span></div>
                 <div class="feat">🗓️<span>Itinerary</span></div>
             </div>
         </header>
@@ -57,23 +58,26 @@
 
             <textarea
                 id="userInput"
-                placeholder="e.g. Plan a 7-day Japan trip from New York with flights, hotels and sightseeing under $5000..."
+                placeholder="e.g. Plan a 7-day Canada trip from New York with hotels and sightseeing under $5000..."
             ></textarea>
 
             <div class="destinations">
-                <button class="dest-btn" onclick="setPrompt('Plan a complete 7 days Japan trip from New York including flights, hotels and sightseeing under $5000.')">🇯🇵 Japan</button>
-                <button class="dest-btn" onclick="setPrompt('Plan a 5 days Dubai trip from New York with flights, hotels and sightseeing.')">🇦🇪 Dubai</button>
-                <button class="dest-btn" onclick="setPrompt('Plan a 7 days Thailand trip from New York with budget hotels and sightseeing.')">🇹🇭 Thailand</button>
-                <button class="dest-btn" onclick="setPrompt('Plan a 10 days Europe trip from New York covering Paris, Rome and Barcelona.')">🇪🇺 Europe</button>
-                <button class="dest-btn" onclick="setPrompt('Plan a 5 days Maldives honeymoon trip from New York with luxury resorts.')">🏝️ Maldives</button>
+                <button class="dest-btn" onclick="setPrompt('Plan a 5-day Dubai trip from New York with flights, hotels and sightseeing.')">🇦🇪 Dubai</button>
+                <button class="dest-btn" onclick="setPrompt('Plan a 10-day Europe trip from New York covering Paris, Rome and Barcelona.')">🇪🇺 Europe</button>
+                <button class="dest-btn" onclick="setPrompt('Plan a 7-day Canada trip from New York covering Toronto and Montreal with hotels and sightseeing.')">🇨🇦 Canada</button>
+                <button class="dest-btn" onclick="setPrompt('Plan a 7-day Saudi Arabia trip from New York covering Riyadh and Jeddah with hotels and sightseeing.')">🇸🇦 Saudi</button>
+                <button class="dest-btn" onclick="setPrompt('Plan a 5-day Maldives trip from New York with resorts, beaches and sightseeing.')">🏝️ Maldives</button>
             </div>
 
             <div class="input-footer">
                 <span class="kbd-tip">Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send</span>
+                <div class="trip-actions">
+                <button id="newTripBtn" class="btn-action" onclick="newTrip()">＋ New Trip</button>
                 <button id="sendBtn" onclick="sendMessage()">
                     <span id="btnText">Generate Plan →</span>
                     <span id="btnLoader" class="spin hidden"></span>
                 </button>
+                </div>
             </div>
         </div>
 
@@ -81,33 +85,10 @@
         <div id="thinkingBox" class="agent-box hidden">
             <div class="agent-header">
                 <div class="pulse-ring"></div>
-                <span>AI agents working on your plan…</span>
+                <span>Agent workflow</span>
             </div>
-            <div class="agent-row">
-                <div class="agent" id="step-flight">
-                    <div class="agent-ico">✈️</div>
-                    <div class="agent-lbl">Flights</div>
-                    <div class="agent-track"><div class="agent-prog"></div></div>
-                </div>
-                <div class="agent-arrow">›</div>
-                <div class="agent" id="step-hotel">
-                    <div class="agent-ico">🏨</div>
-                    <div class="agent-lbl">Hotels</div>
-                    <div class="agent-track"><div class="agent-prog"></div></div>
-                </div>
-                <div class="agent-arrow">›</div>
-                <div class="agent" id="step-weather">
-                    <div class="agent-ico">🌤️</div>
-                    <div class="agent-lbl">Weather</div>
-                    <div class="agent-track"><div class="agent-prog"></div></div>
-                </div>
-                <div class="agent-arrow">›</div>
-                <div class="agent" id="step-itinerary">
-                    <div class="agent-ico">📋</div>
-                    <div class="agent-lbl">Itinerary</div>
-                    <div class="agent-track"><div class="agent-prog"></div></div>
-                </div>
-            </div>
+            <p id="progressMessage" role="status">Preparing your draft…</p>
+            <div id="agentProgress" class="workflow-progress" aria-live="polite"></div>
         </div>
 
         <!-- RESULT -->
@@ -116,7 +97,7 @@
                 <div class="result-title-row">
                     <div class="result-icon-wrap">🎯</div>
                     <div>
-                        <h2>Your AI Travel Plan</h2>
+                        <h2 id="resultTitle">Your AI Travel Plan</h2>
                         <div id="threadInfo" class="thread-id">—</div>
                     </div>
                 </div>
@@ -126,6 +107,18 @@
                 </div>
             </div>
 
+            <div id="reviewBox" class="review-box hidden" aria-live="polite">
+                <h3>Review your draft</h3>
+                <p id="approvalMessage"></p>
+                <label for="reviewFeedback">Changes you would like (required for revisions)</label>
+                <textarea id="reviewFeedback" placeholder="e.g. Reduce driving time and add vegetarian restaurants."></textarea>
+                <div class="review-actions">
+                    <button id="approveBtn" class="btn-action" onclick="submitReview(true)">Approve &amp; finalize</button>
+                    <button id="reviseBtn" class="btn-action" onclick="submitReview(false)">Apply feedback &amp; finalize</button>
+                </div>
+                <p>Feedback is applied to the final plan. Research is not rerun.</p>
+            </div>
+            <p id="agentSummary" class="agent-summary"></p>
             <div class="tab-bar" id="resultTabs">
                 <button class="tab active" data-tab="full">📄 Full Plan</button>
                 <button class="tab" data-tab="flights">✈️ Flights</button>
@@ -153,6 +146,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="/static/script.js"></script>
+    <script src="/static/script.js?v=workspace-2"></script>
 </body>
 </html>

@@ -1,5 +1,10 @@
-let currentThreadId = localStorage.getItem("travel_thread_id") || null;
+let currentThreadId = sessionStorage.getItem("travel_thread_id") || null;
 let latestAnswerMarkdown = "";
+let pendingReview = null;
+let requestBusy = false;
+let progressTimer = null;
+let progressGeneration = 0;
+let tripGeneration = 0;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,56 +79,125 @@ function setPrompt(text) {
     el.focus();
 }
 
+function newTrip() {
+    // Ignore late responses from a trip that was still generating.
+    tripGeneration++;
+    stopProgress();
+    currentThreadId = "user_" + crypto.randomUUID();
+    sessionStorage.setItem("travel_thread_id", currentThreadId);
+    sessionStorage.removeItem("travel_pending_review");
+    localStorage.removeItem("travel_thread_id");
+    pendingReview = null;
+    latestAnswerMarkdown = "";
+    const input = document.getElementById("userInput");
+    input.value = "";
+    input.style.height = "auto";
+    document.getElementById("reviewFeedback").value = "";
+    document.getElementById("approvalMessage").textContent = "";
+    document.getElementById("agentSummary").textContent = "";
+    document.getElementById("threadInfo").textContent = "—";
+    document.getElementById("resultTitle").textContent = "Your AI Travel Plan";
+    document.getElementById("agentProgress").replaceChildren();
+    for (const id of ["resultBox", "flightBox", "hotelBox", "itineraryBox"]) {
+        document.getElementById(id).replaceChildren();
+    }
+    document.querySelectorAll(".tab").forEach(tab => {
+        tab.classList.remove("hidden");
+        tab.classList.toggle("active", tab.dataset.tab === "full");
+    });
+    document.querySelectorAll(".panel").forEach(panel => {
+        panel.classList.toggle("active", panel.dataset.panel === "full");
+    });
+    hideError();
+    setLoading(false);
+    document.getElementById("progressMessage").textContent = "";
+    for (const id of ["resultSection", "thinkingBox", "reviewBox"]) {
+        document.getElementById(id).classList.add("hidden");
+    }
+    input.focus();
+}
+
 // ─── Loading ──────────────────────────────────────────────────────────────────
 
-function setLoading(on) {
+function setLoading(on, reviewing = false) {
+    requestBusy = on;
     const btn      = document.getElementById("sendBtn");
     const btnText  = document.getElementById("btnText");
     const btnSpin  = document.getElementById("btnLoader");
     const thinking = document.getElementById("thinkingBox");
 
-    btn.disabled = on;
+    btn.disabled = on || Boolean(pendingReview);
+    document.getElementById("approveBtn").disabled = on;
+    document.getElementById("reviseBtn").disabled = on;
     btnText.classList.toggle("hidden", on);
     btnSpin.classList.toggle("hidden", !on);
 
-    if (on) {
-        thinking.classList.remove("hidden");
-        startAgents();
-    } else {
-        thinking.classList.add("hidden");
-        stopAgents();
+    if (on) thinking.classList.remove("hidden");
+    if (!on) {
+        document.getElementById("progressMessage").textContent = pendingReview ? "Draft ready — review it below." : "Request finished.";
+        return;
+    }
+    document.getElementById("progressMessage").textContent = reviewing
+        ? "Applying your review and preparing the final plan…"
+        : "The supervisor is selecting research agents and preparing your draft…";
+}
+
+const AGENT_LABELS = {
+    supervisor: "Supervisor & guardrail", flight_agent: "Flights",
+    hotel_agent: "Hotels", weather_agent: "Weather", budget_agent: "Budget",
+    itinerary_agent: "Itinerary", human_approval: "Your review",
+    final_agent: "Final response", guardrail_blocked: "Request blocked"
+};
+
+function renderProgress(data) {
+    const container = document.getElementById("agentProgress");
+    container.replaceChildren();
+    for (const agent of data.agents || []) {
+        const card = document.createElement("div");
+        card.className = "workflow-step " + agent.status;
+        const title = document.createElement("strong");
+        title.textContent = AGENT_LABELS[agent.name] || agent.name;
+        const status = document.createElement("span");
+        status.textContent = agent.status === "waiting" ? "Awaiting your review" : agent.status;
+        card.append(title, status);
+        container.append(card);
     }
 }
 
-// ─── Agent animation ──────────────────────────────────────────────────────────
-
-const STEP_IDS = ["step-flight", "step-hotel", "step-weather", "step-itinerary"];
-let agentTimer = null;
-
-function startAgents() {
-    STEP_IDS.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.classList.remove("active", "done");
-    });
-    runAgent(0);
+function stopProgress() {
+    progressGeneration++;
+    clearTimeout(progressTimer);
 }
 
-function runAgent(i) {
-    if (i >= STEP_IDS.length) return;
-    const el = document.getElementById(STEP_IDS[i]);
-    if (el) el.classList.add("active");
-    agentTimer = setTimeout(() => {
-        if (el) { el.classList.remove("active"); el.classList.add("done"); }
-        runAgent(i + 1);
-    }, 2800);
+function startProgress(threadId, runId = null) {
+    stopProgress();
+    const generation = progressGeneration;
+    const poll = async () => {
+        try {
+            const suffix = runId ? "?run_id=" + encodeURIComponent(runId) : "";
+            const response = await fetch("/api/travel/progress/" + encodeURIComponent(threadId) + suffix);
+            if (response.ok) {
+                const data = await response.json();
+                if (generation === progressGeneration) renderProgress(data);
+            }
+        } catch (_) { /* Progress polling does not interrupt the main request. */ }
+        if (generation === progressGeneration) progressTimer = setTimeout(poll, 1500);
+    };
+    poll();
 }
 
-function stopAgents() {
-    clearTimeout(agentTimer);
-    STEP_IDS.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) { el.classList.remove("active"); el.classList.add("done"); }
-    });
+function renderResultProgress(data) {
+    stopProgress();
+    document.getElementById("thinkingBox").classList.remove("hidden");
+    const blocked = data.guardrail_allowed === false;
+    const agents = [{name: "supervisor", status: "completed"}];
+    if (blocked) agents.push({name: "guardrail_blocked", status: "blocked"});
+    else {
+        for (const name of data.selected_agents || []) agents.push({name, status: "completed"});
+        agents.push({name: "human_approval", status: data.requires_approval ? "waiting" : "completed"});
+        agents.push({name: "final_agent", status: data.requires_approval ? "queued" : "completed"});
+    }
+    renderProgress({agents});
 }
 
 // ─── Error ────────────────────────────────────────────────────────────────────
@@ -156,7 +230,26 @@ function initTabs() {
 // ─── Show result ──────────────────────────────────────────────────────────────
 
 function showResult(data) {
+    renderResultProgress(data);
     latestAnswerMarkdown = toStr(data.answer);
+    pendingReview = data.requires_approval ? data : null;
+    if (pendingReview) {
+        sessionStorage.setItem("travel_pending_review", JSON.stringify(data));
+    } else {
+        sessionStorage.removeItem("travel_pending_review");
+    }
+    const blocked = data.guardrail_allowed === false;
+    document.getElementById("resultTitle").textContent = blocked
+        ? "Request needs attention" : pendingReview ? "Draft — awaiting your review" : "Your final travel plan";
+    document.getElementById("reviewBox").classList.toggle("hidden", !pendingReview);
+    document.getElementById("approvalMessage").textContent = data.approval_request || "Review the draft below before continuing.";
+    document.getElementById("reviewFeedback").value = "";
+    document.getElementById("agentSummary").textContent = blocked ? "Research was not started."
+        : "Selected agents: " + (data.selected_agents || []).map(name => name.replace(/_agent$/, "")).join(", ");
+    for (const [tab, value] of [["flights", data.flight_results], ["hotels", data.hotel_results], ["itinerary", data.itinerary]]) {
+        document.querySelector(`.tab[data-tab="${tab}"]`).classList.toggle("hidden", !toStr(value).trim());
+    }
+    document.getElementById("sendBtn").disabled = requestBusy || Boolean(pendingReview);
 
     document.getElementById("resultBox").innerHTML    = md(data.answer);
     document.getElementById("flightBox").innerHTML    = md(data.flight_results);
@@ -174,12 +267,16 @@ function showResult(data) {
 
     const section = document.getElementById("resultSection");
     section.classList.remove("hidden");
-    setTimeout(() => section.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+    const generation = tripGeneration;
+    setTimeout(() => {
+        if (generation === tripGeneration) section.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
 }
 
 // ─── Send ─────────────────────────────────────────────────────────────────────
 
 async function sendMessage() {
+    if (requestBusy || pendingReview) return;
     hideError();
 
     const input   = document.getElementById("userInput");
@@ -190,29 +287,73 @@ async function sendMessage() {
         return;
     }
 
+    const generation = tripGeneration;
+    const runId = crypto.randomUUID();
+    if (!currentThreadId) currentThreadId = "user_" + crypto.randomUUID();
     setLoading(true);
+    renderProgress({agents: [{name: "supervisor", status: "running"}]});
+    startProgress(currentThreadId, runId);
 
     try {
         const res  = await fetch("/api/travel", {
             method:  "POST",
             headers: { "Content-Type": "application/json" },
-            body:    JSON.stringify({ message, thread_id: currentThreadId })
+            body:    JSON.stringify({ message, thread_id: currentThreadId, run_id: runId })
         });
 
         const data = await res.json();
+        if (generation !== tripGeneration) return;
 
         if (!res.ok || !data.success) {
             throw new Error(data.error || "Something went wrong. Please try again.");
         }
 
         currentThreadId = data.thread_id;
-        localStorage.setItem("travel_thread_id", currentThreadId);
+        sessionStorage.setItem("travel_thread_id", currentThreadId);
         showResult(data);
 
     } catch (err) {
-        showError(err.message);
+        if (generation === tripGeneration) showError(err.message);
     } finally {
-        setLoading(false);
+        if (generation === tripGeneration) {
+            stopProgress();
+            setLoading(false);
+        }
+    }
+}
+
+async function submitReview(approved) {
+    if (requestBusy || !pendingReview) return;
+    hideError();
+    const feedback = document.getElementById("reviewFeedback").value.trim();
+    if (!approved && !feedback) {
+        showError("Describe the changes you want before requesting a revision.");
+        document.getElementById("reviewFeedback").focus();
+        return;
+    }
+    const generation = tripGeneration;
+    const reviewThread = pendingReview.thread_id;
+    setLoading(true, true);
+    startProgress(reviewThread);
+    try {
+        const res = await fetch("/api/travel/approve", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ thread_id: reviewThread, approved, feedback })
+        });
+        const data = await res.json();
+        if (generation !== tripGeneration) return;
+        if (!res.ok || !data.success) throw new Error(data.error || "Review could not be submitted.");
+        currentThreadId = data.thread_id;
+        sessionStorage.setItem("travel_thread_id", currentThreadId);
+        showResult(data);
+    } catch (err) {
+        if (generation === tripGeneration) showError(err.message);
+    } finally {
+        if (generation === tripGeneration) {
+            stopProgress();
+            setLoading(false);
+        }
     }
 }
 
@@ -275,6 +416,15 @@ function downloadPDF() {
 
 document.addEventListener("DOMContentLoaded", () => {
     initTabs();
+    try {
+        const saved = JSON.parse(sessionStorage.getItem("travel_pending_review") || "null");
+        if (saved && saved.requires_approval && saved.thread_id) {
+            currentThreadId = saved.thread_id;
+            showResult(saved);
+        }
+    } catch (_) {
+        sessionStorage.removeItem("travel_pending_review");
+    }
 
     const ta = document.getElementById("userInput");
     ta.addEventListener("input", () => {

@@ -796,3 +796,99 @@ footer {
     .tab-bar { padding: 14px 18px 0; }
     .panel   { padding: 18px; }
 }
+
+/* Draft review and human approval */
+.review-box { margin: 20px; padding: 20px; border: 1px solid #93c5fd; border-radius: 14px; background: #eff6ff; }
+.review-box h3 { margin-bottom: 10px; }
+.review-box p { margin: 10px 0; }
+.review-box label { display: block; margin-top: 14px; font-weight: 600; }
+.review-box textarea { width: 100%; min-height: 90px; margin: 10px 0; padding: 12px; border: 1px solid #93c5fd; border-radius: 10px; font: inherit; box-sizing: border-box; }
+.review-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.agent-summary, #progressMessage { padding: 12px 20px; color: var(--muted); }
+button:disabled { opacity: .55; cursor: wait; }
+@media print { .review-box, .agent-summary { display: none !important; } }
+
+.workflow-progress { display: flex; gap: 12px; flex-wrap: wrap; padding: 0 20px 20px; }
+.workflow-step { flex: 1 1 125px; padding: 14px; border: 1px solid #cbd5e1; border-radius: 12px; background: #f8fafc; }
+.workflow-step strong, .workflow-step span { display: block; }
+.workflow-step span { margin-top: 8px; font-size: .85rem; text-transform: capitalize; }
+.workflow-step.running { border-color: #2563eb; background: #eff6ff; }
+.workflow-step.completed { border-color: #16a34a; background: #f0fdf4; }
+.workflow-step.waiting { border-color: #d97706; background: #fffbeb; }
+.workflow-step.blocked { border-color: #dc2626; background: #fef2f2; }
+
+.trip-actions { display: flex; align-items: center; gap: 12px; }
+#newTripBtn { white-space: nowrap; }
+@media (max-width: 680px) {
+    .trip-actions { width: 100%; flex-wrap: wrap; }
+    .trip-actions #sendBtn, .trip-actions #newTripBtn { flex: 1; width: auto; }
+}
+
+/* Responsive planning workspace */
+.layout {
+    width: min(1600px, calc(100% - 64px));
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(280px, .8fr) minmax(0, 1.7fr);
+    align-items: start;
+    column-gap: 40px;
+    row-gap: 24px;
+    align-content: start;
+    padding-bottom: 28px;
+}
+.nav, .agent-box, .result-card, .err, footer { grid-column: 1 / -1; width: 100%; margin-bottom: 0; }
+.nav { padding: 22px 0; border-bottom: 1px solid var(--border); }
+.hero { width: 100%; text-align: left; padding: 28px 0 16px; }
+.hero-badge { font-size: .73rem; padding: 6px 12px; margin-bottom: 20px; }
+.hero h1 { font-size: clamp(2rem, 3vw, 3.1rem); line-height: 1.12; margin-bottom: 18px; }
+.hero p { font-size: 1rem; line-height: 1.7; max-width: 38ch; margin: 0 0 24px; }
+.feature-row { justify-content: flex-start; gap: 8px; }
+.feat { padding: 7px 11px; font-size: .8rem; }
+.input-card { width: 100%; padding: 28px; margin: 0; }
+.input-card-title p { color: var(--sub); }
+#userInput { min-height: 160px; }
+.input-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.trip-actions { display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: nowrap; margin-left: auto; }
+.trip-actions #newTripBtn, .trip-actions #sendBtn { display: inline-flex; align-items: center; justify-content: center; height: 48px; width: auto; flex: 0 0 auto; margin: 0; font: inherit; font-size: .9rem; font-weight: 700; border-radius: 12px; white-space: nowrap; cursor: pointer; }
+.trip-actions #newTripBtn { min-width: 120px; padding: 0 18px; border: 1.5px solid var(--ocean); color: var(--ocean-dk); background: white; }
+.trip-actions #newTripBtn:hover { background: #e0f2fe; }
+.trip-actions #sendBtn { min-width: 172px; padding: 0 22px; }
+button:focus-visible { outline: 3px solid var(--aqua); outline-offset: 3px; }
+.result-card { min-width: 0; }
+.panel { overflow-wrap: anywhere; }
+.panel > * { max-width: 100%; }
+.panel table { display: block; overflow-x: auto; }
+.review-box { margin: 24px 28px; }
+.workflow-progress { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); }
+.agent-summary, #progressMessage { color: var(--sub); }
+footer { padding: 12px 0; font-size: .75rem; }
+@media (max-width: 1000px) {
+    .layout { width: calc(100% - 40px); grid-template-columns: 1fr; row-gap: 20px; }
+    .hero { padding: 8px 0 0; }
+    .hero h1 br { display: none; }
+    .hero h1 { font-size: 2rem; }
+    .hero-badge { margin-bottom: 12px; }
+    .hero p { max-width: none; margin-bottom: 14px; }
+    .feature-row { display: none; }
+}
+@media (max-width: 600px) {
+    .layout { width: calc(100% - 28px); gap: 18px; }
+    .nav { padding: 16px 0; }
+    .nav-brand { font-size: 1.15rem; }
+    .nav-status { padding: 6px 10px; font-size: .72rem; }
+    .hero h1 { font-size: 1.8rem; }
+    .input-card { padding: 20px; }
+    .input-card-title h2 { font-size: 1.1rem; }
+    #userInput { min-height: 140px; }
+    .kbd-tip { display: none; }
+    .input-footer, .trip-actions { width: 100%; }
+    .trip-actions { margin: 0; gap: 10px; flex-wrap: nowrap; }
+    .trip-actions #newTripBtn { min-width: 0; padding: 0 12px; }
+    .trip-actions #sendBtn { min-width: 0; flex: 1; padding: 0 12px; }
+    .review-box { margin: 18px; padding: 16px; }
+    .review-actions { flex-direction: column; }
+    .workflow-progress { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0 16px 16px; }
+}
+@media print {
+    .layout { display: block; width: 100%; }
+}
