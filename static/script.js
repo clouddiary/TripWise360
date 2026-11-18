@@ -92,6 +92,7 @@ function newTrip() {
     const input = document.getElementById("userInput");
     input.value = "";
     input.style.height = "auto";
+    document.getElementById("savedThreadId").value = "";
     document.getElementById("reviewFeedback").value = "";
     document.getElementById("approvalMessage").textContent = "";
     document.getElementById("agentSummary").textContent = "";
@@ -121,6 +122,7 @@ function newTrip() {
 
 function setLoading(on, reviewing = false) {
     requestBusy = on;
+    document.getElementById("openTripBtn").disabled = on;
     const btn      = document.getElementById("sendBtn");
     const btnText  = document.getElementById("btnText");
     const btnSpin  = document.getElementById("btnLoader");
@@ -138,12 +140,12 @@ function setLoading(on, reviewing = false) {
         return;
     }
     document.getElementById("progressMessage").textContent = reviewing
-        ? "Applying your review and preparing the final plan…"
+        ? "Processing your review — revisions return to research and draft review…"
         : "The supervisor is selecting research agents and preparing your draft…";
 }
 
 const AGENT_LABELS = {
-    supervisor: "Supervisor & guardrail", flight_agent: "Flights",
+    revision: "Updating trip requirements", supervisor: "Supervisor & guardrail", flight_agent: "Flights",
     hotel_agent: "Hotels", weather_agent: "Weather", budget_agent: "Budget",
     itinerary_agent: "Itinerary", human_approval: "Your review",
     final_agent: "Final response", guardrail_blocked: "Request blocked"
@@ -322,6 +324,34 @@ async function sendMessage() {
     }
 }
 
+async function openSavedTrip() {
+    if (requestBusy) return;
+    hideError();
+    const threadId = document.getElementById("savedThreadId").value.trim();
+    if (!threadId) {
+        showError("Paste the saved trip's thread ID in Open a saved trip.");
+        return;
+    }
+    const generation = tripGeneration;
+    stopProgress();
+    setLoading(true);
+    document.getElementById("progressMessage").textContent = "Opening saved trip…";
+    try {
+        const response = await fetch("/api/travel/threads/" + encodeURIComponent(threadId));
+        const data = await response.json();
+        if (generation !== tripGeneration) return;
+        if (!response.ok || !data.success) throw new Error(data.error || "Could not open saved trip.");
+        currentThreadId = data.thread_id;
+        sessionStorage.setItem("travel_thread_id", currentThreadId);
+        document.getElementById("userInput").value = data.user_query || "";
+        showResult(data);
+    } catch (error) {
+        if (generation === tripGeneration) showError(error.message);
+    } finally {
+        if (generation === tripGeneration) setLoading(false);
+    }
+}
+
 async function submitReview(approved) {
     if (requestBusy || !pendingReview) return;
     hideError();
@@ -416,6 +446,9 @@ function downloadPDF() {
 
 document.addEventListener("DOMContentLoaded", () => {
     initTabs();
+    document.getElementById("savedThreadId").addEventListener("keydown", event => {
+        if (event.key === "Enter") { event.preventDefault(); openSavedTrip(); }
+    });
     try {
         const saved = JSON.parse(sessionStorage.getItem("travel_pending_review") || "null");
         if (saved && saved.requires_approval && saved.thread_id) {
@@ -434,5 +467,5 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 document.addEventListener("keydown", e => {
-    if (e.ctrlKey && e.key === "Enter") sendMessage();
+    if (e.ctrlKey && e.key === "Enter" && e.target.id === "userInput") sendMessage();
 });

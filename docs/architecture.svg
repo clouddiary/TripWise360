@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1330" viewBox="0 0 1400 1330" role="img" aria-labelledby="title desc">
+<title id="title">TripWise360 supervisor and human review architecture</title><desc id="desc">Strict input guardrail, dynamic specialist selection, human revision loop, direct OpenAI model calls, and PostgreSQL checkpoints.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#46627b"/></marker></defs>
+<rect width="1400" height="1330" fill="#f4f8fc"/>
+<style>text{font-family:Arial,sans-serif;fill:#17324d}.title{font-size:30px;font-weight:700}.heading{font-size:20px;font-weight:700}.body{font-size:16px}.small{font-size:14px}.line{fill:none;stroke:#46627b;stroke-width:2;marker-end:url(#arrow)}</style>
+<text x="50" y="48" class="title" text-anchor="start">TripWise360 · Supervisor, strict guardrail &amp; human review</text>
+<text x="50" y="80" class="body" text-anchor="start">All language-model calls: OpenAI gpt-5-nano via LangChain. MCP connects research tools.</text>
+<rect x="50" y="110" width="330" height="110" rx="14" fill="white" stroke="#d9e8f5" stroke-width="2"/>
+<text x="68" y="142" class="heading" text-anchor="start">1 · User request</text>
+<text x="68" y="171" class="body" text-anchor="start">Web UI / FastAPI</text>
+<text x="68" y="194" class="body" text-anchor="start">New Trip → fresh thread ID</text>
+<rect x="450" y="110" width="470" height="110" rx="14" fill="white" stroke="#d9e8f5" stroke-width="2"/>
+<text x="468" y="142" class="heading" text-anchor="start">2 · Input guardrail</text>
+<text x="468" y="171" class="body" text-anchor="start">Strict Boolean + reason; malformed or</text>
+<text x="468" y="194" class="body" text-anchor="start">unavailable validation stops research.</text>
+<rect x="1010" y="110" width="340" height="110" rx="14" fill="white" stroke="#edb7b7" stroke-width="2"/>
+<text x="1028" y="142" class="heading" text-anchor="start">Blocked / retry</text>
+<text x="1028" y="171" class="body" text-anchor="start">Return reason and stop.</text>
+<text x="1028" y="194" class="body" text-anchor="start">No specialist research runs.</text>
+<path d="M380 165H450" class="line"/>
+<path d="M920 165H1010" class="line"/>
+<text x="950" y="150" class="small" text-anchor="middle">deny</text>
+<rect x="300" y="265" width="800" height="110" rx="14" fill="white" stroke="#c7b6e5" stroke-width="2"/>
+<text x="318" y="297" class="heading" text-anchor="start">3 · Supervisor selects specialists</text>
+<text x="318" y="326" class="body" text-anchor="start">Outputs selected_agents, trip_constraints and reasoning.</text>
+<text x="318" y="349" class="body" text-anchor="start">Dynamic selection; permitted order remains defined in code.</text>
+<path d="M680 220V265" class="line"/>
+<text x="700" y="247" class="small" text-anchor="start">allow</text>
+<text x="50" y="420" class="heading" text-anchor="start">4 · Selected specialists run sequentially; unselected tasks are skipped</text>
+<rect x="50" y="450" width="245" height="165" rx="14" fill="white" stroke="#d9e8f5" stroke-width="2"/>
+<text x="68" y="482" class="heading" text-anchor="start">Flight</text>
+<text x="68" y="511" class="body" text-anchor="start">AviationStack MCP</text>
+<text x="68" y="534" class="body" text-anchor="start">Origin departure timetable</text>
+<text x="68" y="557" class="body" text-anchor="start">Model-generated guidance</text>
+<text x="68" y="580" class="body" text-anchor="start">No ticket prices</text>
+<rect x="315" y="450" width="245" height="165" rx="14" fill="white" stroke="#d9e8f5" stroke-width="2"/>
+<text x="333" y="482" class="heading" text-anchor="start">Hotel</text>
+<text x="333" y="511" class="body" text-anchor="start">Tavily MCP web search</text>
+<text x="333" y="534" class="body" text-anchor="start">Snippets and source URLs</text>
+<text x="333" y="557" class="body" text-anchor="start">No verified dated rates</text>
+<text x="333" y="580" class="body" text-anchor="start">No confirmed inventory</text>
+<rect x="580" y="450" width="245" height="165" rx="14" fill="white" stroke="#d9e8f5" stroke-width="2"/>
+<text x="598" y="482" class="heading" text-anchor="start">Weather</text>
+<text x="598" y="511" class="body" text-anchor="start">Custom OpenWeatherMap</text>
+<text x="598" y="534" class="body" text-anchor="start">Current + first 5 entries</text>
+<text x="598" y="557" class="body" text-anchor="start">Explicit request only</text>
+<text x="598" y="580" class="body" text-anchor="start">Not trip-date forecasts</text>
+<rect x="845" y="450" width="245" height="165" rx="14" fill="white" stroke="#d9e8f5" stroke-width="2"/>
+<text x="863" y="482" class="heading" text-anchor="start">Budget</text>
+<text x="863" y="511" class="body" text-anchor="start">Direct OpenAI model</text>
+<text x="863" y="534" class="body" text-anchor="start">Approximate estimates</text>
+<text x="863" y="557" class="body" text-anchor="start">Feasibility analysis</text>
+<text x="863" y="580" class="body" text-anchor="start">Not live price quotes</text>
+<rect x="1110" y="450" width="245" height="165" rx="14" fill="white" stroke="#d9e8f5" stroke-width="2"/>
+<text x="1128" y="482" class="heading" text-anchor="start">Itinerary</text>
+<text x="1128" y="511" class="body" text-anchor="start">Direct OpenAI model</text>
+<text x="1128" y="534" class="body" text-anchor="start">Combines available results</text>
+<text x="1128" y="557" class="body" text-anchor="start">Always included</text>
+<text x="1128" y="580" class="body" text-anchor="start">Produces review draft</text>
+<path d="M700 375V435H172V450" class="line"/>
+<path d="M295 530H315" class="line"/>
+<path d="M560 530H580" class="line"/>
+<path d="M825 530H845" class="line"/>
+<path d="M1090 530H1110" class="line"/>
+<rect x="190" y="655" width="1020" height="95" rx="14" fill="white" stroke="#d9e8f5" stroke-width="2"/>
+<text x="208" y="687" class="heading" text-anchor="start">Shared TravelState</text>
+<text x="208" y="716" class="body" text-anchor="start">query · constraints · selected agents · research results · draft · review · messages · llm_calls</text>
+<path d="M1232 615V638H700V655" class="line"/>
+<rect x="300" y="790" width="800" height="110" rx="14" fill="white" stroke="#e7c998" stroke-width="2"/>
+<text x="318" y="822" class="heading" text-anchor="start">5 · Human review — persisted interrupt()</text>
+<text x="318" y="851" class="body" text-anchor="start">Approve → final generation. Request changes → rewrite and replan.</text>
+<text x="318" y="874" class="body" text-anchor="start">Every revised draft requires another review.</text>
+<path d="M700 750V790" class="line"/>
+<rect x="50" y="940" width="560" height="110" rx="14" fill="white" stroke="#c7b6e5" stroke-width="2"/>
+<text x="68" y="972" class="heading" text-anchor="start">Revision request</text>
+<text x="68" y="1001" class="body" text-anchor="start">Merge feedback into a complete updated request.</text>
+<text x="68" y="1024" class="body" text-anchor="start">Clear stale research; guardrail + supervisor run again.</text>
+<path d="M300 845H120V925" class="line"/>
+<text x="138" y="862" class="small" text-anchor="start">feedback</text>
+<path d="M50 995H24V320H300" class="line"/>
+<text x="42" y="300" class="small" text-anchor="start">revalidate</text>
+<rect x="750" y="940" width="600" height="110" rx="14" fill="white" stroke="#a6d6c0" stroke-width="2"/>
+<text x="768" y="972" class="heading" text-anchor="start">6 · Final response</text>
+<text x="768" y="1001" class="body" text-anchor="start">Direct OpenAI formatting of the approved draft.</text>
+<text x="768" y="1024" class="body" text-anchor="start">No booking or purchase execution.</text>
+<path d="M950 900V940" class="line"/>
+<text x="968" y="926" class="small" text-anchor="start">approve</text>
+<text x="50" y="1090" class="small" text-anchor="start">Revision rewrite failure → preserve the previous draft and return to human review.</text>
+<rect x="50" y="1120" width="1300" height="120" rx="14" fill="white" stroke="#d9e8f5" stroke-width="2"/>
+<text x="68" y="1152" class="heading" text-anchor="start">PostgreSQL checkpoint persistence — throughout execution</text>
+<text x="68" y="1181" class="body" text-anchor="start">Per-thread graph checkpoints, intermediate writes and messages; supports pause/resume.</text>
+<text x="68" y="1204" class="body" text-anchor="start">No separate application conversations table, vector memory, or automatic history retrieval.</text>
+<text x="68" y="1227" class="body" text-anchor="start">Revision context is explicit. New planning runs reset research; New Trip does not delete old checkpoints.</text>
+<text x="50" y="1282" class="small" text-anchor="start">Evidence limits: flight schedules depend on provider plan; hotel inventory is unverified; weather is near-term; budgets are estimates.</text>
+</svg>

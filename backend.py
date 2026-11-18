@@ -8,6 +8,7 @@ load_dotenv()
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
+from workflow_rules import GuardrailDecision, HumanReview, RevisedRequest
 from typing import Any, TypedDict, Annotated
 import operator
 import uuid
@@ -130,6 +131,8 @@ class TravelState(TypedDict, total=False):
     approved: bool
     human_feedback: str
     final_response: str
+    revision_count: int
+    revision_error: str
 
     llm_calls: int
 
@@ -193,59 +196,6 @@ def _empty_constraints() -> dict[str, Any]:
     }
 
 
-
-# =========================
-# Shared helpers
-# =========================
-KNOWN_AGENTS = {
-    "flight_agent",
-    "hotel_agent",
-    "weather_agent",
-    "budget_agent",
-    "itinerary_agent",
-}
-
-AGENT_ORDER = [
-    "flight_agent",
-    "hotel_agent",
-    "weather_agent",
-    "budget_agent",
-    "itinerary_agent",
-]
-
-
-def _llm_text(system_prompt: str, user_prompt: str) -> str:
-    response = llm.invoke(
-        [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ]
-    )
-    return str(response.content)
-
-
-def _json_from_llm(text: str) -> dict[str, Any]:
-    """Extract the first complete JSON object returned by the model."""
-    start = text.find("{")
-    end = text.rfind("}")
-
-    if start == -1 or end == -1 or end < start:
-        raise ValueError("The model did not return a JSON object.")
-
-    return json.loads(text[start : end + 1])
-
-
-def _empty_constraints() -> dict[str, Any]:
-    return {
-        "destination": "",
-        "origin": "",
-        "duration": "",
-        "budget": "",
-        "travel_style": "",
-        "special_preferences": [],
-    }
-
-
 # =========================
 # Supervisor Agent + Input Guardrail
 # =========================
@@ -274,8 +224,7 @@ User request:
 {query}
 """
 
-    # Fail open on parser/model errors so a temporary JSON-format issue does not
-    # break the original travel-planning behavior.
+    # A malformed or unavailable guardrail must never authorize research.
     try:
         log_llm_call("validate travel input guardrail")
         guardrail_raw = _llm_text(
@@ -284,14 +233,14 @@ User request:
             guardrail_prompt,
         )
         log_llm_done("input guardrail", len(guardrail_raw))
-        guardrail_result = _json_from_llm(guardrail_raw)
-        allowed = bool(guardrail_result.get("allowed", True))
-        guardrail_reason = str(guardrail_result.get("reason", "")).strip()
+        decision = GuardrailDecision.model_validate_json(guardrail_raw)
+        allowed = decision.allowed
+        guardrail_reason = decision.reason.strip()
         llm_calls += 1
     except Exception as exc:
         log_error("Input guardrail fallback", str(exc))
-        allowed = True
-        guardrail_reason = "Guardrail validation fallback allowed the request."
+        allowed = False
+        guardrail_reason = "Request validation could not be completed. Please retry your request."
 
     log_result("Guardrail decision", "Allowed" if allowed else "Blocked")
     log_state_write("Supervisor", "guardrail_allowed", str(allowed))
@@ -777,13 +726,14 @@ def human_approval_agent(state: TravelState):
         }
     )
 
-    approved = bool(review.get("approved", False))
-    human_feedback = str(review.get("feedback", "")).strip()
+    decision = HumanReview.model_validate(review)
+    approved = decision.approved
+    human_feedback = decision.feedback
 
     log_result("Human review received", "Approved" if approved else "Revision requested")
     log_state_write("HumanApproval", "approved", str(approved))
     log_state_write("HumanApproval", "human_feedback", f"{len(human_feedback)} chars")
-    log_agent_done("Human Approval", "continuing to final agent")
+    log_agent_done("Human Approval", "finalizing approved draft" if approved else "returning for revision")
     return {
         "approved": approved,
         "human_feedback": human_feedback,
@@ -794,22 +744,85 @@ def human_approval_agent(state: TravelState):
 
 
 
+def route_after_review(state: TravelState) -> str:
+    return "final_agent" if state.get("approved") is True else "revision"
+
+
+def revision_agent(state: TravelState):
+    """Merge feedback into a complete request, then replan/research from scratch."""
+    log_agent_start("Revision", f"revision {state.get('revision_count', 0) + 1}")
+    prompt = f"""
+Rewrite the current trip request to incorporate the user's latest changes.
+Return strict JSON only: {{"updated_request": "complete revised travel request"}}
+Preserve unchanged requirements and explicit exclusions. Latest feedback overrides
+conflicting earlier requirements. Resolve relative changes exactly once. The
+updated request must stand alone: replace old destinations, durations or budgets
+rather than including contradictory alternatives. Do not invent missing details.
+Do not answer the request or silently remove unsafe intent; preserve its meaning
+so the input guardrail can validate it before research.
+
+Current request:
+{state['user_query']}
+
+Current constraints:
+{state.get('trip_constraints', {})}
+
+Draft itinerary (context only, not new user requirements):
+{state.get('itinerary', '')}
+
+Latest user feedback:
+{state.get('human_feedback', '')}
+"""
+    try:
+        log_llm_call("merge revision feedback into trip request")
+        raw = _llm_text("You update travel requirements. Return strict JSON only.", prompt)
+        log_llm_done("revision request update", len(raw))
+        revised = RevisedRequest.model_validate_json(raw)
+    except Exception as exc:
+        log_error("Revision request update", str(exc))
+        log_agent_done("Revision", "keeping previous draft for another review")
+        return {
+            "revision_error": "Could not prepare the revision. Please retry with feedback or approve the existing draft.",
+            "approval_request": "Revision could not be prepared. Your previous draft is unchanged; review it again.",
+            "approved": False,
+            "llm_calls": state.get("llm_calls", 0) + 1,
+        }
+
+    log_state_write("Revision", "user_query", revised.updated_request)
+    log_agent_done("Revision", "returning to guardrail and supervisor")
+    return {
+        "user_query": revised.updated_request,
+        "selected_agents": [],
+        "trip_constraints": _empty_constraints(),
+        "supervisor_reasoning": "",
+        "flight_results": "", "hotel_results": "", "weather_results": "",
+        "budget_results": "", "itinerary": "", "final_response": "",
+        "approval_request": "", "approved": False,
+        "guardrail_allowed": True, "guardrail_reason": "",
+        "revision_count": state.get("revision_count", 0) + 1,
+        "revision_error": "",
+        "llm_calls": state.get("llm_calls", 0) + 1,
+    }
+
+
+def route_after_revision(state: TravelState) -> str:
+    return "human_approval" if state.get("revision_error") else "supervisor"
+
+
 # =========================
-# Final Response Agent - original format kept, HITL feedback added
+# Final Response Agent - formats an explicitly approved draft
 # =========================
 def final_agent(state: TravelState):
-    log_agent_start("Final Agent", "applying human review and formatting response")
+    if state.get("approved") is not True:
+        raise ValueError("The current draft must be approved before finalization.")
+    log_agent_start("Final Agent", "formatting approved response")
     for field in ("approved", "human_feedback", "trip_constraints", "flight_results", "hotel_results", "weather_results", "budget_results", "itinerary"):
         log_available_state("FinalAgent", state, (field,))
-    if state.get("approved", False):
-        review_instruction = (
-            "The user approved the draft. Preserve its decisions while polishing it."
-        )
-    else:
-        review_instruction = f"""
-The user requested a revision. Apply this feedback carefully:
-{state.get('human_feedback', '') or 'Improve the draft before finalizing it.'}
-"""
+    review_instruction = (
+        "The user approved this draft. Preserve its decisions while polishing it. "
+        "Any revision feedback has already been applied in the reviewed draft. "
+        "Do not apply relative changes a second time."
+    )
 
     final_prompt = f"""
 Generate the final travel response for the user.
@@ -852,7 +865,7 @@ Important:
 - Mention that live flight APIs may not provide ticket prices when pricing is unavailable.
 - Include weather-based travel advice.
 - Keep the response useful for real travel planning.
-- Incorporate the human feedback when revision was requested.
+- Do not alter approved requirements or invent research for skipped agents.
 """
 
     log_llm_call("format final travel response with human review")
@@ -934,6 +947,7 @@ graph.add_node("weather_agent", weather_agent)
 graph.add_node("budget_agent", budget_agent)
 graph.add_node("itinerary_agent", itinerary_agent)
 graph.add_node("human_approval", human_approval_agent)
+graph.add_node("revision", revision_agent)
 graph.add_node("final_agent", final_agent)
 
 graph.add_edge(START, "supervisor")
@@ -953,11 +967,16 @@ graph.add_conditional_edges(
 )
 
 graph.add_edge("itinerary_agent", "human_approval")
-graph.add_edge("human_approval", "final_agent")
+graph.add_conditional_edges("human_approval", route_after_review, {
+    "final_agent": "final_agent", "revision": "revision",
+})
+graph.add_conditional_edges("revision", route_after_revision, {
+    "supervisor": "supervisor", "human_approval": "human_approval",
+})
 graph.add_edge("final_agent", END)
 graph.add_edge("guardrail_blocked", END)
 
-log_system("Graph: supervisor → selected specialists → itinerary → human approval → final; blocked requests → END")
+log_system("Graph: guardrail/supervisor → specialists → draft → review; revise → replan; approve → final")
 
 
 # =========================
@@ -1004,18 +1023,20 @@ def _interrupt_payload(result: dict[str, Any]) -> dict[str, Any] | None:
 def _serialize_result(
     result: dict[str, Any],
     thread_id: str,
+    log_status: bool = True,
 ) -> dict[str, Any]:
     messages = result.get("messages", [])
     last_message = messages[-1].content if messages else ""
     answer = result.get("final_response") or last_message
     interrupt_payload = _interrupt_payload(result)
 
-    if interrupt_payload is not None:
-        log_system(f"Graph paused for human approval · Thread: {thread_id}")
-    elif not result.get("guardrail_allowed", True):
-        log_system(f"Graph stopped by input guardrail · Thread: {thread_id}")
-    else:
-        log_graph_done(thread_id, result.get("llm_calls", 0))
+    if log_status:
+        if interrupt_payload is not None:
+            log_system(f"Graph paused for human approval · Thread: {thread_id}")
+        elif not result.get("guardrail_allowed", True):
+            log_system(f"Graph stopped by input guardrail · Thread: {thread_id}")
+        else:
+            log_graph_done(thread_id, result.get("llm_calls", 0))
 
     if interrupt_payload:
         answer = interrupt_payload.get("draft_itinerary") or result.get(
@@ -1024,6 +1045,7 @@ def _serialize_result(
 
     return {
         "thread_id": thread_id,
+        "user_query": result.get("user_query", ""),
         "answer": answer,
         "requires_approval": interrupt_payload is not None,
         "approval_request": (
@@ -1046,10 +1068,30 @@ def _serialize_result(
         "guardrail_allowed": result.get("guardrail_allowed", True),
         "guardrail_reason": result.get("guardrail_reason", ""),
         "approved": result.get("approved"),
+        "revision_count": result.get("revision_count", 0),
+        "revision_error": result.get("revision_error", ""),
         "human_feedback": result.get("human_feedback", ""),
         "llm_calls": result.get("llm_calls", 0),
     }
 
+
+
+def load_travel_thread(thread_id: str) -> dict[str, Any]:
+    """Read a saved trip without invoking the graph or changing checkpoints."""
+    thread_id = thread_id.strip()
+    if not thread_id:
+        raise ValueError("Please provide a thread ID.")
+    snapshot = travel_graph.get_state({"configurable": {"thread_id": thread_id}})
+    if not snapshot.values:
+        raise LookupError("Trip not found. Check the thread ID and database connection.")
+    interrupts = [item for task in snapshot.tasks for item in getattr(task, "interrupts", ())]
+    if snapshot.next and not interrupts:
+        raise RuntimeError("This trip is running or stopped before review. Please wait for it to finish.")
+    result = dict(snapshot.values)
+    if interrupts:
+        result["__interrupt__"] = interrupts
+    log_system(f"Opened saved trip · Thread: {thread_id}")
+    return _serialize_result(result, thread_id, log_status=False)
 
 
 def run_travel_agent(user_input: str, thread_id: str | None = None, run_id: str | None = None):
@@ -1079,6 +1121,8 @@ def run_travel_agent(user_input: str, thread_id: str | None = None, run_id: str 
             "approved": False,
             "human_feedback": "",
             "final_response": "",
+            "revision_count": 0,
+            "revision_error": "",
             "llm_calls": 0,
         },
         config=config,
@@ -1098,12 +1142,16 @@ def resume_travel_agent(
         raise ValueError("thread_id is required to resume a travel plan.")
 
     log_system(f"Resuming human review · Thread: {thread_id} · Approved: {approved} · Feedback: {len(feedback.strip())} chars")
+    decision = HumanReview(approved=approved, feedback=feedback)
     config = {"configurable": {"thread_id": thread_id}}
+    snapshot = travel_graph.get_state(config)
+    if not any(getattr(task, "interrupts", ()) for task in snapshot.tasks):
+        raise ValueError("This trip is not waiting for human review.")
     result = travel_graph.invoke(
         Command(
             resume={
-                "approved": approved,
-                "feedback": feedback.strip(),
+                "approved": decision.approved,
+                "feedback": decision.feedback,
             }
         ),
         config=config,
@@ -1122,7 +1170,7 @@ def get_travel_progress(thread_id: str, run_id: str | None = None):
     next_nodes = set(snapshot.next)
     interrupted = any(getattr(task, "interrupts", ()) for task in snapshot.tasks)
     selected = _selected_agents(state)
-    agents = [{"name": "supervisor", "status": "running" if "supervisor" in next_nodes else "completed"}]
+    agents = ([{"name": "revision", "status": "running"}] if "revision" in next_nodes else []) + [{"name": "supervisor", "status": "running" if "supervisor" in next_nodes else "completed"}]
     fields = {
         "flight_agent": "flight_results", "hotel_agent": "hotel_results",
         "weather_agent": "weather_results", "budget_agent": "budget_results",

@@ -44,6 +44,7 @@ COPY --from=builder /install /usr/local
 # ── Application source ───────────────────────
 COPY app.py                      ./app.py
 COPY backend.py                  ./backend.py
+COPY workflow_rules.py           ./workflow_rules.py
 COPY mcp_client.py               ./mcp_client.py
 COPY custom_weather_mcp_server.py ./custom_weather_mcp_server.py
 COPY logger.py                   ./logger.py

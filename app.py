@@ -8,7 +8,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
-from backend import run_travel_agent, resume_travel_agent, get_travel_progress
+from workflow_rules import HumanReview
+from backend import run_travel_agent, resume_travel_agent, get_travel_progress, load_travel_thread
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -39,10 +40,8 @@ class TravelRequest(BaseModel):
     run_id: str | None = None
 
 
-class ApprovalRequest(BaseModel):
+class ApprovalRequest(HumanReview):
     thread_id: str = Field(min_length=1)
-    approved: bool
-    feedback: str = ""
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -131,6 +130,22 @@ async def approve_travel_plan(request_data: ApprovalRequest):
                 "error": str(exc),
             },
         )
+
+
+@app.get("/api/travel/threads/{thread_id}")
+async def open_travel_thread(thread_id: str):
+    try:
+        result = await run_in_threadpool(load_travel_thread, thread_id)
+        return {"success": True, **result}
+    except LookupError as exc:
+        return JSONResponse(status_code=404, content={"success": False, "error": str(exc)})
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
+    except RuntimeError as exc:
+        return JSONResponse(status_code=409, content={"success": False, "error": str(exc)})
+    except Exception:
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"success": False, "error": "Saved trip could not be loaded. Check the server database connection."})
 
 
 @app.get("/api/travel/progress/{thread_id}")

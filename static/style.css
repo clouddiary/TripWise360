@@ -892,3 +892,11 @@ footer { padding: 12px 0; font-size: .75rem; }
 @media print {
     .layout { display: block; width: 100%; }
 }
+
+.open-trip { border-top: 1px solid var(--border); margin-top: 22px; padding-top: 18px; }
+.open-trip label { display: block; font-weight: 700; font-size: .85rem; margin-bottom: 8px; }
+.open-trip-controls { display: flex; gap: 10px; }
+.open-trip input { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; font: inherit; font-size: .85rem; }
+.open-trip input:focus { outline: 2px solid var(--ocean); outline-offset: 2px; }
+.open-trip p { font-size: .78rem; color: var(--sub); margin-top: 8px; }
+#openTripBtn { white-space: nowrap; }

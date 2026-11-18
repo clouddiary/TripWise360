@@ -1,6 +1,6 @@
 # ✈️ TripWise 360 — Multi-Agent AI Travel Planner
 
-A production-ready, multi-agent AI travel planning application built with **LangGraph**, **LangChain**, **FastAPI**, and the **Model Context Protocol (MCP)**. Enter any natural-language travel request and get real-time flights, hotel recommendations, weather forecasts, and a full day-by-day itinerary — all generated autonomously by a team of specialized AI agents.
+A demo travel research application built with **LangGraph**, **LangChain**, **FastAPI**, and **MCP**. A supervisor selects specialists, an input guardrail checks requests, and a human reviews each draft before final generation. Flight guidance, hotel web search, near-term weather, and budget estimates have the evidence limits described below.
 
 ![TripWise 360 UI](docs/screenshots/ui.png)
 
@@ -15,22 +15,24 @@ A production-ready, multi-agent AI travel planning application built with **Lang
 ## 📸 Architecture
 
 
-![TripWise Arch Diagram](docs/screenshots/multi-agent-sequencial.jpg)
+![TripWise supervisor, strict guardrail and HITL architecture](docs/architecture.svg)
+
+[Architecture details and editable Mermaid source](docs/architecture.md). The older sequential illustration is retained as a historical asset.
 
 ---
 
 ## 🧠 Key Concepts
 
-### 1. LangGraph — Agent Orchestration
-LangGraph is used to build a **directed state graph** where each node is a specialized AI agent. Agents run sequentially, each reading from and writing to a shared `TravelState` TypedDict. The graph handles execution order, state passing, and persistence automatically.
+### 1. LangGraph — Supervisor and review loop
+The supervisor performs input validation, extracts constraints, and selects specialists. Selected specialists run sequentially in a fixed permitted order. The itinerary always runs. This is dynamic selection inside a predefined graph, not unrestricted workflow generation.
 
-```python
-graph.add_edge(START,            "flight_agent")
-graph.add_edge("flight_agent",   "hotel_agent")
-graph.add_edge("hotel_agent",    "weather_agent")
-graph.add_edge("weather_agent",  "itinerary_agent")
-graph.add_edge("itinerary_agent","final_agent")
-graph.add_edge("final_agent",     END)
+```text
+Request → strict input guardrail → supervisor → selected specialists → draft → human review
+                   │                                                           │
+                 blocked                 revision ← feedback ──────────────────┤
+                   ↓                        │                                  │ approve
+                  END                       └→ revised request → guardrail     ↓
+                                                                          final → END
 ```
 
 ### 2. Model Context Protocol (MCP)
@@ -56,46 +58,45 @@ class TravelState(TypedDict):
     llm_calls:      int
 ```
 
-### 4. PostgreSQL Checkpointer
-LangGraph's `PostgresSaver` persists the full conversation state after every agent step. This enables **multi-turn conversations** — a user can follow up on a previous plan and the agent remembers the full context via `thread_id`.
+### 4. PostgreSQL checkpoints
+`PostgresSaver` stores graph state and messages by `thread_id` at graph steps. Checkpoints support human-review pause/resume and the revision loop. They are not a separate conversations table or semantic long-term memory. A new planning run resets research and constraints; historical messages are not automatically supplied to planning prompts. Within a revision loop, the current request is explicitly rewritten with feedback. **New Trip** creates a fresh thread.
 
 ### 5. Async Bridge (`run_async`)
-LangGraph runs sync node functions in a thread pool executor inside FastAPI's async event loop. A custom `run_async()` helper detects whether a running event loop exists and routes async MCP calls through a dedicated daemon thread to avoid nested-loop errors.
+FastAPI runs synchronous graph calls in a worker thread so progress polling remains responsive. `run_async()` bridges synchronous nodes to async MCP calls, using `asyncio.run()` or a separate thread executor when an event loop is already running.
 
 ---
+
+## Reopen a saved trip
+
+Copy the `thread_id` shown with a draft. After restarting the app, use **Open a saved trip → Open Trip** (paste only the ID, not a natural-language command). The app reads `GET /api/travel/threads/{thread_id}` from the same PostgreSQL checkpoint store. Pending drafts restore approval and revision controls; completed trips display their final response. This read does not rerun agents. Unknown IDs return 404, and a thread still executing or stopped before review returns 409. Keep the same database and checkpoints across restarts.
+
+The travel textarea and **Generate Plan** start planning; they are not a saved-thread lookup.
 
 ## 🤖 Agent Pipeline
 
-### Flight Agent
-- Extracts departure and arrival IATA codes from the user query using an LLM call
-- Calls `flight_arrival_departure_schedule` on AviationStack MCP with the IATA codes
-- Generates flight guidance using live schedule data + LLM
+- **Input guardrail:** OpenAI `gpt-5-nano` returns JSON with a real Boolean `allowed` and a string `reason`. Missing fields, wrong types, extra fields, malformed JSON, and provider errors stop research. A blocked decision requires a nonempty reason. This is an LLM relevance/safety check, not comprehensive date or budget validation.
+- **Supervisor:** selects specialists, extracts `trip_constraints`, and explains scope. Weather is selected only when requested. An itinerary is always generated. On supervisor-planning failure, the current fallback selects flights, hotels, budget, and itinerary.
+- **Flight:** AviationStack MCP departure timetable lookup for the origin, followed by LLM guidance. No live ticket prices, destination/date-filtered booking search, or confirmed availability. Timetable access depends on the provider plan; this integration is not a free-plan booking API.
+- **Hotel:** Tavily MCP web search snippets and URLs; no verified inventory, hotel price comparison, or confirmed dated quotes.
+- **Weather:** custom OpenWeatherMap MCP current conditions and first five forecast entries for one extracted location. Not five daily summaries, seasonal climate research, or a travel-date-matched forecast.
+- **Budget:** direct OpenAI `gpt-5-nano` estimates and feasibility analysis. No MCP model server and no confirmed price quotes.
+- **Itinerary:** direct OpenAI `gpt-5-nano` combines the available research into a draft.
+- **Human review:** persisted `interrupt()` waits for approve or feedback. Feedback is merged into a complete revised request; the guardrail and supervisor run again and selected specialists rerun. Previous research is cleared to prevent reuse for a changed destination. Each revised draft pauses for another review. If request rewriting fails, the previous draft remains available for review; it is not finalized.
+- **Final:** direct OpenAI `gpt-5-nano` formats only an explicitly approved draft. No purchase or booking action occurs.
 
-### Hotel Agent
-- Runs a Tavily web search for hotel options at the destination
-- Returns structured results (name, price, reviews, links)
+Offline regression checks:
 
-### Weather Agent
-- Extracts the destination city using an LLM call
-- Calls `get_current_weather` and `get_forecast` on the custom OpenWeatherMap MCP server
-- Returns current conditions and a 5-step forecast
-
-### Itinerary Agent
-- Receives flight, hotel, and weather results from shared state
-- Uses OpenAI LLM to generate a practical day-by-day plan
-
-### Final Agent
-- Combines all results into a single, beautifully formatted travel response
-- Structures output into: Trip Summary, Flights, Hotels, Weather, Day-by-Day Itinerary, Budget, Recommendations
-
----
+```bash
+python -m unittest discover -s tests -v
+```
 
 ## 📁 Project Structure
 
 ```
 TripWise360/
 ├── app.py                      # FastAPI app — routes & server
-├── backend.py                  # LangGraph graph, all agents, run_async helper
+├── backend.py                  # Supervisor graph, specialists, HITL revision loop
+├── workflow_rules.py           # Strict guardrail, review and revised-request contracts
 ├── mcp_client.py               # MCP client setup (Tavily, AviationStack, Weather)
 ├── custom_weather_mcp_server.py# Custom MCP server wrapping OpenWeatherMap API
 ├── requirements.txt
@@ -174,7 +175,7 @@ cp .env.example .env
 # OpenAI
 OPEN_API_KEY=<OpenAI API key>
 
-# AviationStack — https://aviationstack.com (free tier works)
+# AviationStack — https://aviationstack.com (timetable tool requires suitable plan)
 AVIATIONSTACK_API_KEY=<AviationStack API key>
 
 # Tavily — https://tavily.com (free tier works)
@@ -233,7 +234,7 @@ docker run -p 8000:8000 --env-file .env tripwise360
 | OpenWeatherMap | 60 calls/min | Current weather + 5-day forecast |
 | AWS RDS PostgreSQL | db.t3.micro free tier | Conversation memory / checkpointing |
 
-> **Note:** `list_airports` and `list_airlines` on AviationStack require the Basic plan. This project uses `flight_arrival_departure_schedule` which is available on the free tier.
+> **Note:** The current flight integration calls an airport timetable tool. Do not assume the free plan permits it. Provider errors fall back to general guidance; ticket prices are not retrieved.
 
 ---
 
@@ -249,7 +250,7 @@ MCP decouples the tool implementation from the agent logic. Swapping AviationSta
 OpenWeatherMap doesn't have a published MCP server. `custom_weather_mcp_server.py` wraps it in ~60 lines using `FastMCP`, making it a first-class tool indistinguishable from third-party MCP servers.
 
 **Why PostgreSQL for state?**
-LangGraph's `PostgresSaver` checkpointer persists the full graph state after every node execution. This enables true multi-turn conversations where users can refine their plan across multiple requests using the same `thread_id`. This project uses an **AWS RDS PostgreSQL micro instance** as the backing store.
+LangGraph's `PostgresSaver` checkpointer persists the full graph state after every node execution. This supports persisted HITL pause/resume; revision feedback is explicitly merged into the current request. General conversation-history retrieval is not implemented. This project uses an **AWS RDS PostgreSQL micro instance** as the backing store.
 
 ---
 
@@ -287,50 +288,7 @@ LangGraph's `PostgresSaver` checkpointer persists the full graph state after eve
 
 ## 🗺️ Flow Diagram
 
-```
-User Input
-    │
-    ▼
-FastAPI (app.py)
-    │  POST /api/travel
-    ▼
-run_travel_agent() ──────────────────────────────────────────────────────────┐
-    │                                                                         │
-    ▼                                                                         │
-LangGraph StateGraph                                                          │
-    │                                                                         │
-    ├──► Flight Agent                                                         │
-    │        │ LLM extracts IATA codes from query                            │
-    │        │ AviationStack MCP → flight_arrival_departure_schedule          │
-    │        │ LLM generates flight guidance                                  │
-    │        └──► writes flight_results to state                             │
-    │                                                                         │
-    ├──► Hotel Agent                                                          │
-    │        │ Tavily MCP → web search for hotels                            │
-    │        └──► writes hotel_results to state                              │
-    │                                                                         │
-    ├──► Weather Agent                                                        │
-    │        │ LLM extracts destination city                                 │
-    │        │ Custom Weather MCP → current + forecast                       │
-    │        └──► writes weather_results to state                            │
-    │                                                                         │
-    ├──► Itinerary Agent                                                      │
-    │        │ Reads flight + hotel + weather from state                     │
-    │        │ LLM generates day-by-day itinerary                            │
-    │        └──► writes itinerary to state                                  │
-    │                                                                         │
-    └──► Final Agent                                                          │
-             │ Reads all state fields                                         │
-             │ LLM formats complete travel response                           │
-             └──► returns final answer ◄────────────────────────────────────┘
-                            │
-                            ▼
-                   PostgreSQL Checkpoint
-                   (state saved per thread_id)
-                            │
-                            ▼
-                   JSON Response → Frontend
-```
+See the [current architecture](docs/architecture.md) and [SVG diagram](docs/architecture.svg). Historical terminal screenshots below may show the earlier fixed sequential pipeline.
 
 ---
 

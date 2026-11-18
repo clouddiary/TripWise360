@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=workspace-2">
+    <link rel="stylesheet" href="/static/style.css?v=workspace-3">
 </head>
 <body>
 
@@ -79,6 +79,14 @@
                 </button>
                 </div>
             </div>
+            <div class="open-trip">
+                <label for="savedThreadId">Open a saved trip</label>
+                <div class="open-trip-controls">
+                    <input id="savedThreadId" type="text" placeholder="Paste your thread ID (user_…)" autocomplete="off" spellcheck="false">
+                    <button id="openTripBtn" class="btn-action" onclick="openSavedTrip()">Open Trip</button>
+                </div>
+                <p>Restore a draft awaiting review or view a completed plan.</p>
+            </div>
         </div>
 
         <!-- AGENT PROGRESS -->
@@ -114,9 +122,9 @@
                 <textarea id="reviewFeedback" placeholder="e.g. Reduce driving time and add vegetarian restaurants."></textarea>
                 <div class="review-actions">
                     <button id="approveBtn" class="btn-action" onclick="submitReview(true)">Approve &amp; finalize</button>
-                    <button id="reviseBtn" class="btn-action" onclick="submitReview(false)">Apply feedback &amp; finalize</button>
+                    <button id="reviseBtn" class="btn-action" onclick="submitReview(false)">Request revised draft</button>
                 </div>
-                <p>Feedback is applied to the final plan. Research is not rerun.</p>
+                <p>Changes return to the supervisor and selected research agents. Review the revised draft before approving.</p>
             </div>
             <p id="agentSummary" class="agent-summary"></p>
             <div class="tab-bar" id="resultTabs">
@@ -146,6 +154,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="/static/script.js?v=workspace-2"></script>
+    <script src="/static/script.js?v=workspace-3"></script>
 </body>
 </html>
