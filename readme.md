@@ -8,63 +8,35 @@ This application researches and drafts travel plans. It does not book flights or
 
 ## Screenshots
 
-New screenshots will be added here. The obsolete screenshots have been removed; the slots below are ready for their replacements.
-
 ### Planning workspace
 
-> **Screenshot placeholder:** Wide desktop layout showing the destination samples, **New Trip**, **Generate Plan**, and **Open a saved trip**.
->
-> Suggested file: `docs/screenshots/planning-workspace.png`
+Create a new trip, choose a sample destination, or reopen a saved thread.
 
-<!-- Add when uploaded: ![TripWise360 planning workspace](docs/screenshots/planning-workspace.png) -->
+![TripWise360 planning workspace with New Trip, Generate Plan, and Open Trip](docs/screenshots/home.png)
 
-### Selected agents and progress
+### Selected agents and human review
 
-> **Screenshot placeholder:** Supervisor-selected agents with queued, running, and completed states. Use a road-trip request to demonstrate that flights can be skipped.
->
-> Suggested file: `docs/screenshots/agent-progress.png`
+The workflow displays the selected specialists and pauses on the draft for approval or revision feedback.
 
-<!-- Add when uploaded: ![Selected agents and checkpoint-based progress](docs/screenshots/agent-progress.png) -->
+![Selected agents, draft itinerary, and human-in-the-loop review controls](docs/screenshots/agent_response_with_hitl.png)
 
-### Draft review and revisions
+### Saved-trip recovery and final response
 
-> **Screenshot placeholder:** Draft itinerary with **Approve & finalize**, feedback input, and **Request revised draft**. A second capture can show the revised draft awaiting approval.
->
-> Suggested files: `docs/screenshots/draft-review.png`, `docs/screenshots/revised-draft.png`
+Open an existing thread to recover its saved state. This example shows a retrieved, completed plan.
 
-<!-- Add when uploaded: ![Human review of a draft itinerary](docs/screenshots/draft-review.png) -->
-<!-- Add when uploaded: ![Revised draft awaiting approval](docs/screenshots/revised-draft.png) -->
+![Saved thread retrieved with its completed workflow and final travel plan](docs/screenshots/retrieve_thread.png)
 
-### Saved-trip recovery
+### Agent interaction logs
 
-> **Screenshot placeholder:** **Open a saved trip** restoring a pending draft and its review controls from an existing thread ID.
->
-> Suggested file: `docs/screenshots/saved-trip-recovery.png`
+Terminal logs show supervisor decisions, specialist activity, routing, and review checkpoints.
 
-<!-- Add when uploaded: ![Saved trip restored for review](docs/screenshots/saved-trip-recovery.png) -->
-
-### Guardrail and final response
-
-> **Screenshot placeholders:** A blocked unrelated request, followed by a separate example of an approved final plan.
->
-> Suggested files: `docs/screenshots/guardrail-blocked.png`, `docs/screenshots/final-plan.png`
-
-<!-- Add when uploaded: ![Input guardrail blocks an unrelated request](docs/screenshots/guardrail-blocked.png) -->
-<!-- Add when uploaded: ![Approved final travel plan](docs/screenshots/final-plan.png) -->
-
-### Terminal logs
-
-> **Screenshot placeholder:** Supervisor decisions, actual routing, specialist execution, HITL pause/resume, and final completion. Hide credentials and private trip details before sharing.
->
-> Suggested file: `docs/screenshots/workflow-logs.png`
-
-<!-- Add when uploaded: ![Supervisor and human-review workflow logs](docs/screenshots/workflow-logs.png) -->
+![Agent interactions and workflow logs](docs/screenshots/agents-interaction-logs.png)
 
 ## Architecture
 
-![TripWise360 supervisor, guardrail, and HITL architecture](docs/architecture-shared-state.svg)
+![TripWise360 supervisor, guardrail, shared-state, and HITL architecture](docs/screenshots/architecture_diagram.jpg)
 
-See [architecture details and editable Mermaid source](docs/architecture.md).
+See [architecture details and editable Mermaid source](docs/architecture.md). The [editable SVG diagram](docs/architecture-shared-state.svg) is also available.
 
 ```text
 User request
@@ -338,8 +310,8 @@ TripWise360/
 │   └── style.css                  # Responsive workspace styles
 ├── docs/
 │   ├── architecture.md            # Architecture notes and Mermaid source
-│   ├── architecture-shared-state.svg           # Current diagram
-│   └── screenshots/               # Planned screenshot location; slots listed above
+│   ├── architecture-shared-state.svg  # Editable SVG diagram
+│   └── screenshots/               # Architecture image and current UI/log captures
 ├── .env.example                   # Configuration template; actual .env stays local
 ├── requirements.txt
 └── Dockerfile
