@@ -22,10 +22,21 @@ flowchart TD
     HITL -->|Feedback| REV[Rewrite complete request; clear stale research]
     REV -->|Valid rewrite| G
     REV -->|Rewrite failed| HITL
-    STATE[(TravelState checkpoints + messages in PostgreSQL)] -. save and resume graph steps .- G
-    STATE -. shared per-thread state .- R
-    STATE -. persist draft and review .- HITL
+    STATE[Shared TravelState: inputs, outputs, draft, review and messages]
+    G <-.-> STATE
+    S <-.-> STATE
+    F <-.-> STATE
+    H <-.-> STATE
+    W <-.-> STATE
+    C <-.-> STATE
+    I <-.-> STATE
+    HITL <-.-> STATE
+    REV <-.-> STATE
+    FINAL <-.-> STATE
+    STATE <-.-> DB[(PostgreSQL per-thread graph checkpoints)]
 ```
+
+**Solid arrows** show workflow relationships. **Dashed bidirectional links** show nodes reading shared state and returning partial updates. LangGraph merges those updates; agents do not exchange results directly. PostgreSQL persists the state through the checkpointer.
 
 Specialist arrows identify eligible tasks, **not parallel execution**. The implemented order is flights → hotels → weather → budget → itinerary, skipping unselected research tasks. Itinerary is always included. Weather is requested explicitly. The graph edges remain defined in code.
 

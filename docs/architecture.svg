@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1330" viewBox="0 0 1400 1330" role="img" aria-labelledby="title desc">
-<title id="title">TripWise360 supervisor and human review architecture</title><desc id="desc">Strict input guardrail, dynamic specialist selection, human revision loop, direct OpenAI model calls, and PostgreSQL checkpoints.</desc>
+<title id="title">TripWise360 supervisor and human review architecture</title><desc id="desc">Strict input guardrail, dynamic specialist selection, human revision loop, direct OpenAI model calls, and PostgreSQL checkpoints. Each specialist has a bidirectional dashed connection to shared TravelState.</desc>
 <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#46627b"/></marker></defs>
 <rect width="1400" height="1330" fill="#f4f8fc"/>
-<style>text{font-family:Arial,sans-serif;fill:#17324d}.title{font-size:30px;font-weight:700}.heading{font-size:20px;font-weight:700}.body{font-size:16px}.small{font-size:14px}.line{fill:none;stroke:#46627b;stroke-width:2;marker-end:url(#arrow)}</style>
+<style>text{font-family:Arial,sans-serif;fill:#17324d}.title{font-size:30px;font-weight:700}.heading{font-size:20px;font-weight:700}.body{font-size:16px}.small{font-size:14px}.line{fill:none;stroke:#46627b;stroke-width:2;marker-end:url(#arrow)}.state-link{fill:none;stroke:#46627b;stroke-width:2;stroke-dasharray:5 4;marker-start:url(#arrow);marker-end:url(#arrow)}</style>
 <text x="50" y="48" class="title" text-anchor="start">TripWise360 · Supervisor, strict guardrail &amp; human review</text>
 <text x="50" y="80" class="body" text-anchor="start">All language-model calls: OpenAI gpt-5-nano via LangChain. MCP connects research tools.</text>
 <rect x="50" y="110" width="330" height="110" rx="14" fill="white" stroke="#d9e8f5" stroke-width="2"/>
@@ -62,15 +62,20 @@
 <path d="M560 530H580" class="line"/>
 <path d="M825 530H845" class="line"/>
 <path d="M1090 530H1110" class="line"/>
-<rect x="190" y="655" width="1020" height="95" rx="14" fill="white" stroke="#d9e8f5" stroke-width="2"/>
-<text x="208" y="687" class="heading" text-anchor="start">Shared TravelState</text>
-<text x="208" y="716" class="body" text-anchor="start">query · constraints · selected agents · research results · draft · review · messages · llm_calls</text>
-<path d="M1232 615V638H700V655" class="line"/>
+<rect x="50" y="655" width="1305" height="95" rx="14" fill="white" stroke="#d9e8f5" stroke-width="2"/>
+<text x="68" y="687" class="heading" text-anchor="start">Shared TravelState</text>
+<text x="68" y="716" class="body" text-anchor="start">query · constraints · selected agents · research results · draft · review · messages · llm_calls</text>
+<path id="flight-state" d="M172 615V655" class="state-link"/>
+<path id="hotel-state" d="M437 615V655" class="state-link"/>
+<path id="weather-state" d="M702 615V655" class="state-link"/>
+<path id="budget-state" d="M967 615V655" class="state-link"/>
+<path id="itinerary-state" d="M1232 615V655" class="state-link"/>
 <rect x="300" y="790" width="800" height="110" rx="14" fill="white" stroke="#e7c998" stroke-width="2"/>
 <text x="318" y="822" class="heading" text-anchor="start">5 · Human review — persisted interrupt()</text>
 <text x="318" y="851" class="body" text-anchor="start">Approve → final generation. Request changes → rewrite and replan.</text>
 <text x="318" y="874" class="body" text-anchor="start">Every revised draft requires another review.</text>
 <path d="M700 750V790" class="line"/>
+<text x="50" y="775" class="small">Dashed ↔ = read inputs / return state updates (all specialists)</text>
 <rect x="50" y="940" width="560" height="110" rx="14" fill="white" stroke="#c7b6e5" stroke-width="2"/>
 <text x="68" y="972" class="heading" text-anchor="start">Revision request</text>
 <text x="68" y="1001" class="body" text-anchor="start">Merge feedback into a complete updated request.</text>
