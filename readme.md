@@ -1,438 +1,398 @@
-# ✈️ TripWise 360 — Multi-Agent AI Travel Planner
+# ✈️ TripWise 360 — Multi-Agent Travel Planner
 
-A demo travel research application built with **LangGraph**, **LangChain**, **FastAPI**, and **MCP**. A supervisor selects specialists, an input guardrail checks requests, and a human reviews each draft before final generation. Flight guidance, hotel web search, near-term weather, and budget estimates have the evidence limits described below.
+A learning and demo project showing **supervisor-based agent selection**, **input guardrails**, and **human-in-the-loop (HITL) review** with LangGraph, FastAPI, OpenAI, MCP tools, and PostgreSQL checkpoints.
 
-![TripWise 360 UI](docs/screenshots/ui.png)
+Describe a trip, follow the selected specialists, review the draft, and either approve it or request another revision. You can reopen a saved trip by thread ID after restarting the app.
 
----
+This application researches and drafts travel plans. It does not book flights or hotels, execute payments, or verify ticket and room availability.
 
-## 🌐 Live Demo
+## Screenshots
 
-> Run locally — see [Getting Started](#-getting-started) below.
+New screenshots will be added here. The obsolete screenshots have been removed; the slots below are ready for their replacements.
 
----
+### Planning workspace
 
-## 📸 Architecture
+> **Screenshot placeholder:** Wide desktop layout showing the destination samples, **New Trip**, **Generate Plan**, and **Open a saved trip**.
+>
+> Suggested file: `docs/screenshots/planning-workspace.png`
 
+<!-- Add when uploaded: ![TripWise360 planning workspace](docs/screenshots/planning-workspace.png) -->
 
-![TripWise supervisor, strict guardrail and HITL architecture](docs/architecture.svg)
+### Selected agents and progress
 
-[Architecture details and editable Mermaid source](docs/architecture.md). The older sequential illustration is retained as a historical asset.
+> **Screenshot placeholder:** Supervisor-selected agents with queued, running, and completed states. Use a road-trip request to demonstrate that flights can be skipped.
+>
+> Suggested file: `docs/screenshots/agent-progress.png`
 
----
+<!-- Add when uploaded: ![Selected agents and checkpoint-based progress](docs/screenshots/agent-progress.png) -->
 
-## 🧠 Key Concepts
+### Draft review and revisions
 
-### 1. LangGraph — Supervisor and review loop
-The supervisor performs input validation, extracts constraints, and selects specialists. Selected specialists run sequentially in a fixed permitted order. The itinerary always runs. This is dynamic selection inside a predefined graph, not unrestricted workflow generation.
+> **Screenshot placeholder:** Draft itinerary with **Approve & finalize**, feedback input, and **Request revised draft**. A second capture can show the revised draft awaiting approval.
+>
+> Suggested files: `docs/screenshots/draft-review.png`, `docs/screenshots/revised-draft.png`
+
+<!-- Add when uploaded: ![Human review of a draft itinerary](docs/screenshots/draft-review.png) -->
+<!-- Add when uploaded: ![Revised draft awaiting approval](docs/screenshots/revised-draft.png) -->
+
+### Saved-trip recovery
+
+> **Screenshot placeholder:** **Open a saved trip** restoring a pending draft and its review controls from an existing thread ID.
+>
+> Suggested file: `docs/screenshots/saved-trip-recovery.png`
+
+<!-- Add when uploaded: ![Saved trip restored for review](docs/screenshots/saved-trip-recovery.png) -->
+
+### Guardrail and final response
+
+> **Screenshot placeholders:** A blocked unrelated request, followed by a separate example of an approved final plan.
+>
+> Suggested files: `docs/screenshots/guardrail-blocked.png`, `docs/screenshots/final-plan.png`
+
+<!-- Add when uploaded: ![Input guardrail blocks an unrelated request](docs/screenshots/guardrail-blocked.png) -->
+<!-- Add when uploaded: ![Approved final travel plan](docs/screenshots/final-plan.png) -->
+
+### Terminal logs
+
+> **Screenshot placeholder:** Supervisor decisions, actual routing, specialist execution, HITL pause/resume, and final completion. Hide credentials and private trip details before sharing.
+>
+> Suggested file: `docs/screenshots/workflow-logs.png`
+
+<!-- Add when uploaded: ![Supervisor and human-review workflow logs](docs/screenshots/workflow-logs.png) -->
+
+## Architecture
+
+![TripWise360 supervisor, guardrail, and HITL architecture](docs/architecture.svg)
+
+See [architecture details and editable Mermaid source](docs/architecture.md).
 
 ```text
-Request → strict input guardrail → supervisor → selected specialists → draft → human review
-                   │                                                           │
-                 blocked                 revision ← feedback ──────────────────┤
-                   ↓                        │                                  │ approve
-                  END                       └→ revised request → guardrail     ↓
-                                                                          final → END
+User request
+    ↓
+Input guardrail → Blocked or invalid validation response → Reason returned; stop
+    ↓ allowed
+Supervisor selects specialists and extracts constraints
+    ↓
+Selected research agents → Itinerary draft
+    ↓
+Human review ── approve ──→ Final response
+    │
+    └── request changes → Rewrite complete request → Guardrail → Supervisor
+                                                      ↓
+                                    New research and draft → Human review again
 ```
 
-### 2. Model Context Protocol (MCP)
-MCP is an open standard that allows LLM applications to connect to external tools and data sources via a unified interface. This project uses three MCP servers:
+PostgreSQL checkpoints persist state throughout the graph, including the human-review pause. Input validation and specialist selection are separate model calls inside the same supervisor node.
 
-| MCP Server | Transport | Provider | Purpose |
-|---|---|---|---|
-| `aviationstack-mcp` | stdio (local) | AviationStack API | Real-time flight schedules |
-| Tavily MCP | HTTP (remote) | Tavily Search API | Hotel & travel search |
-| Custom Weather MCP | stdio (local) | OpenWeatherMap API | Current weather & forecasts |
+### Components
 
-### 3. Shared Agent State
-All agents share a single typed state object. Each agent reads what it needs and writes its result back — no agent needs to know what others are doing.
-
-```python
-class TravelState(TypedDict):
-    messages:       Annotated[list[AnyMessage], operator.add]
-    user_query:     str
-    flight_results: str
-    hotel_results:  str
-    weather_results:str
-    itinerary:      str
-    llm_calls:      int
-```
-
-### 4. PostgreSQL checkpoints
-`PostgresSaver` stores graph state and messages by `thread_id` at graph steps. Checkpoints support human-review pause/resume and the revision loop. They are not a separate conversations table or semantic long-term memory. A new planning run resets research and constraints; historical messages are not automatically supplied to planning prompts. Within a revision loop, the current request is explicitly rewritten with feedback. **New Trip** creates a fresh thread.
-
-### 5. Async Bridge (`run_async`)
-FastAPI runs synchronous graph calls in a worker thread so progress polling remains responsive. `run_async()` bridges synchronous nodes to async MCP calls, using `asyncio.run()` or a separate thread executor when an event loop is already running.
-
----
-
-## Reopen a saved trip
-
-Copy the `thread_id` shown with a draft. After restarting the app, use **Open a saved trip → Open Trip** (paste only the ID, not a natural-language command). The app reads `GET /api/travel/threads/{thread_id}` from the same PostgreSQL checkpoint store. Pending drafts restore approval and revision controls; completed trips display their final response. This read does not rerun agents. Unknown IDs return 404, and a thread still executing or stopped before review returns 409. Keep the same database and checkpoints across restarts.
-
-The travel textarea and **Generate Plan** start planning; they are not a saved-thread lookup.
-
-## 🤖 Agent Pipeline
-
-- **Input guardrail:** OpenAI `gpt-5-nano` returns JSON with a real Boolean `allowed` and a string `reason`. Missing fields, wrong types, extra fields, malformed JSON, and provider errors stop research. A blocked decision requires a nonempty reason. This is an LLM relevance/safety check, not comprehensive date or budget validation.
-- **Supervisor:** selects specialists, extracts `trip_constraints`, and explains scope. Weather is selected only when requested. An itinerary is always generated. On supervisor-planning failure, the current fallback selects flights, hotels, budget, and itinerary.
-- **Flight:** AviationStack MCP departure timetable lookup for the origin, followed by LLM guidance. No live ticket prices, destination/date-filtered booking search, or confirmed availability. Timetable access depends on the provider plan; this integration is not a free-plan booking API.
-- **Hotel:** Tavily MCP web search snippets and URLs; no verified inventory, hotel price comparison, or confirmed dated quotes.
-- **Weather:** custom OpenWeatherMap MCP current conditions and first five forecast entries for one extracted location. Not five daily summaries, seasonal climate research, or a travel-date-matched forecast.
-- **Budget:** direct OpenAI `gpt-5-nano` estimates and feasibility analysis. No MCP model server and no confirmed price quotes.
-- **Itinerary:** direct OpenAI `gpt-5-nano` combines the available research into a draft.
-- **Human review:** persisted `interrupt()` waits for approve or feedback. Feedback is merged into a complete revised request; the guardrail and supervisor run again and selected specialists rerun. Previous research is cleared to prevent reuse for a changed destination. Each revised draft pauses for another review. If request rewriting fails, the previous draft remains available for review; it is not finalized.
-- **Final:** direct OpenAI `gpt-5-nano` formats only an explicitly approved draft. No purchase or booking action occurs.
-
-Offline regression checks:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-## 📁 Project Structure
-
-```
-TripWise360/
-├── app.py                      # FastAPI app — routes & server
-├── backend.py                  # Supervisor graph, specialists, HITL revision loop
-├── workflow_rules.py           # Strict guardrail, review and revised-request contracts
-├── mcp_client.py               # MCP client setup (Tavily, AviationStack, Weather)
-├── custom_weather_mcp_server.py# Custom MCP server wrapping OpenWeatherMap API
-├── requirements.txt
-├── Dockerfile
-├── .env                        # API keys (not committed)
-├── tools/
-│   └── flight_tool.py          # Legacy direct-API flight tool (reference only)
-├── templates/
-│   └── index.html              # Frontend UI
-└── static/
-    ├── style.css               # Ocean-blue light theme
-    └── script.js               # Tab UI, agent animations, PDF export
-```
-
----
-
-## 🔧 Tech Stack
-
-| Layer | Technology |
+| Component | Current behavior |
 |---|---|
-| **API Server** | FastAPI + Uvicorn |
-| **Agent Framework** | LangGraph 1.x |
-| **LLM** | OpenAI GPT (via LangChain) |
-| **Tool Protocol** | Model Context Protocol (MCP) |
-| **MCP Client** | `langchain-mcp-adapters` |
-| **Flight Data** | AviationStack API (`aviationstack-mcp`) |
-| **Web Search** | Tavily Search API (remote MCP) |
-| **Weather Data** | OpenWeatherMap API (custom MCP server) |
-| **Memory / State** | PostgreSQL via `langgraph-checkpoint-postgres` (AWS RDS) |
-| **Frontend** | Vanilla HTML/CSS/JS + Marked.js + html2pdf.js |
-| **Deployment** | Docker |
+| Input guardrail | Checks travel relevance and harmful intent. Strictly validates the model's JSON response and stops research on invalid output or provider failure. |
+| Supervisor | Selects specialists, extracts `trip_constraints`, and records an explanation. |
+| Flight agent | Extracts airport codes, attempts an origin-airport departure timetable through AviationStack MCP, then generates guidance. |
+| Hotel agent | Retrieves Tavily MCP web-search results. |
+| Weather agent | Extracts one destination and calls the custom MCP current-weather and forecast tools. The supervisor is instructed to select it only when weather is requested. |
+| Budget agent | Generates approximate costs and feasibility analysis using the model. |
+| Itinerary agent | Combines the available research into a draft. Always included. |
+| Human approval node | Pauses with `interrupt()` and resumes with the user's decision. |
+| Revision agent | Merges feedback into a complete updated request and clears stale research before revalidation and replanning. |
+| Final agent | Formats the explicitly approved draft. Unapproved drafts cannot reach final generation. |
 
----
+All model calls use **OpenAI `gpt-5-nano` directly through LangChain**. Budget and itinerary generation do not use Llama or an MCP-hosted model.
 
-## 🚀 Getting Started
+### Selection and execution order
+
+The supervisor chooses which specialists participate. Selected agents execute **sequentially** in this permitted order:
+
+```text
+Flights → Hotels → Weather → Budget → Itinerary
+```
+
+Unselected research agents are skipped; itinerary generation always runs. The supervisor does not generate arbitrary graph edges or run specialists in parallel. If specialist-selection parsing fails, the current fallback selects flights, hotels, budget, and itinerary.
+
+### MCP connections
+
+| Server | Transport | Tool integration |
+|---|---|---|
+| AviationStack | Local stdio subprocess: `uvx aviationstack-mcp` | `flight_arrival_departure_schedule` |
+| Tavily | Remote Streamable HTTP | `tavily_search` |
+| Custom weather server | Local stdio subprocess using the app's Python environment | `get_current_weather`, `get_forecast` |
+
+MCP connects external research tools. The shared model client is configured separately in `backend.py`.
+
+## Run locally
 
 ### Prerequisites
 
-- Python 3.11+
-- PostgreSQL database (local or [Render](https://render.com) free tier)
-- API keys for: OpenAI, AviationStack, Tavily, OpenWeatherMap
-- [`uvx`](https://docs.astral.sh/uv/getting-started/installation/) installed (runs MCP servers without manual install)
+- Python environment compatible with [requirements.txt](requirements.txt). The Docker image uses Python 3.12.
+- A reachable PostgreSQL database and credentials that permit checkpoint-table setup.
+- An OpenAI API key, plus credentials for the research services you intend to use: AviationStack, Tavily, and OpenWeatherMap.
+- `uvx` available on `PATH` to launch the AviationStack MCP server.
 
-### 1. Clone the repo
+The backend connects to PostgreSQL and sets up the checkpointer during import. OpenAI configuration and database connectivity must be available before the web server can start.
+
+### 1. Clone and install
 
 ```bash
-git clone https://github.com/your-username/TripWise360.git
+git clone https://github.com/clouddiary/TripWise360.git
 cd TripWise360
-```
-
-### 2. Create and activate a virtual environment
-
-```bash
 python -m venv .venv
-source .venv/bin/activate        # macOS / Linux
-.venv\Scripts\activate           # Windows
 ```
 
-### 3. Install dependencies
+Activate the environment:
 
 ```bash
-pip install -r requirements.txt
+# macOS / Linux
+source .venv/bin/activate
 ```
 
-### 4. Configure environment variables
+```powershell
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+```
 
-Copy the example file and fill in your keys:
+Install dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+### 2. Configure the environment
+
+Copy [.env.example](.env.example) to `.env` and replace the placeholders:
 
 ```bash
 cp .env.example .env
 ```
 
-> ⚠️ `.env` is listed in `.gitignore` and is **never committed**. Use `.env.example` as the reference template.
+| Variable | Purpose |
+|---|---|
+| `OPEN_API_KEY` | OpenAI key. This is the exact variable name the current backend reads. |
+| `DATABASE_URL` | PostgreSQL connection string for graph checkpoints. |
+| `AVIATIONSTACK_API_KEY` | Flight MCP provider credential. The client forwards it as `AVIATION_STACK_API_KEY`. |
+| `TAVILY_API_KEY` | Hotel web-search MCP credential. |
+| `OPENWEATHER_API_KEY` | Custom weather MCP provider credential. |
+| `LANGSMITH_TRACING`, `LANGSMITH_ENDPOINT`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` | Optional tracing settings included in the example file. |
 
-```env
-# OpenAI
-OPEN_API_KEY=<OpenAI API key>
+`.env` is ignored by Git. Do not commit real credentials.
 
-# AviationStack — https://aviationstack.com (timetable tool requires suitable plan)
-AVIATIONSTACK_API_KEY=<AviationStack API key>
+If `DATABASE_URL` has no `sslmode` parameter, the backend appends `sslmode=require`. For a local PostgreSQL instance without TLS, explicitly use `sslmode=disable` in that local connection string. Use the appropriate TLS settings for a hosted database.
 
-# Tavily — https://tavily.com (free tier works)
-TAVILY_API_KEY=<Tavily API key>
+Origin airport codes are extracted from the request; there is no configured default-origin fallback.
 
-# OpenWeatherMap — https://openweathermap.org/api (free tier works)
-OPENWEATHER_API_KEY=<OpenWeatherMap API key>
+**Provider access:** Discovering an MCP tool does not establish subscription entitlement. The flight agent currently calls an airport timetable tool; do not assume a free AviationStack plan permits it. Tool failures can lead to general flight guidance. This README intentionally does not quote changing provider prices or quotas.
 
-# Default origin airport IATA code
-DEFAULT_ORIGIN_IATA=USA
-
-# AWS RDS PostgreSQL (or any PostgreSQL connection string)
-DATABASE_URL=postgresql://<user>:<password>@<host>/<db>
-
-# LangSmith tracing (optional but recommended)
-LANGSMITH_TRACING=true
-LANGSMITH_ENDPOINT=https://api.smith.langchain.com
-LANGSMITH_API_KEY=<LangSmith API key>
-LANGSMITH_PROJECT=TripWise360
-```
-
-### 5. Run the app
+### 3. Start the app
 
 ```bash
 python app.py
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser.
+- UI: [http://127.0.0.1:8000](http://127.0.0.1:8000)
+- Interactive API documentation: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- Basic process health: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
 
-### 6. (Optional) Verify MCP tools are loading
+`python app.py` starts Uvicorn with development reload enabled. The health endpoint is not a live readiness check of every provider.
+
+## Try the demo
+
+1. Enter a request or select **Dubai**, **Europe**, **Canada**, **Saudi**, or **Maldives**.
+2. Click **Generate Plan**. The guardrail runs before specialist selection.
+3. Watch the agent cards. Progress is read from graph checkpoints about every 1.5 seconds, rather than simulated with fixed agent timers. Very short steps may finish between polls. “Completed” means the node returned, not that every provider supplied usable data.
+4. Review the draft. The final agent has not run yet.
+5. Choose **Approve & finalize**, or enter feedback and choose **Request revised draft**.
+6. A revision rewrites the current request, reruns the guardrail and supervisor, clears old research, and runs the newly selected specialists. Review the new draft again before approval.
+7. Copy the displayed result or export a PDF. A draft export is still a draft, not an approval.
+
+**New Trip** creates a fresh thread and clears the browser's current input, results, pending review, errors, and progress. Late responses from a previous trip are ignored. It does not delete previous PostgreSQL checkpoints.
+
+### Suggested requests
+
+| Demonstration | Request |
+|---|---|
+| Road-trip selection | “Plan a 4-day road trip from Toronto to Montreal. No flights. Include hotels and a budget estimate.” |
+| Weather selection | “Plan a 5-day Dubai trip with hotels and a weather forecast.” |
+| Budget analysis | “Plan a 7-day Canada trip from New York with a total budget of 3000 USD.” |
+| Revision loop | On the draft: “Make it six days and include vegetarian restaurants.” |
+| Guardrail | “Write a sorting algorithm.” |
+
+Selections are model decisions guided by the supervisor prompt. Check the displayed selection and terminal logs when demonstrating them.
+
+### Recover a trip tomorrow or after a restart
+
+There is no approval timeout configured by this app. A pending review can be resumed while its database checkpoints remain available.
+
+1. Save the displayed `thread_id`.
+2. Restart the app using the **same PostgreSQL database**.
+3. Paste only the ID into **Open a saved trip** and click **Open Trip**.
+4. Pending drafts restore approval and revision controls. Completed trips show the final response.
+
+Opening a saved trip reads checkpoints; it does not rerun agents. Browser `sessionStorage` restores a pending review on refresh, but may be lost when the tab or browser closes. The database remains the recovery source.
+
+The main textarea is for new planning instructions. Typing “open thread …” there starts a planning request and may be blocked as unrelated; use **Open Trip** instead. A new planning run resets constraints and research, so do not use **Generate Plan** as a substitute for loading a saved draft.
+
+## API reference
+
+See `/docs` for request schemas. Examples below are illustrative; response text, selected agents, and call counts vary.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/` | Planning UI |
+| `POST` | `/api/travel` | Start a planning run; typically returns a draft awaiting review |
+| `POST` | `/api/travel/approve` | Resume a pending review with approval or revision feedback |
+| `GET` | `/api/travel/threads/{thread_id}` | Load a saved pending or completed trip without graph execution |
+| `GET` | `/api/travel/progress/{thread_id}` | Read checkpoint-based agent statuses; optional `run_id` query parameter filters stale runs |
+| `GET` | `/health` | Basic process status and feature names |
+
+### Start planning
+
+```json
+{
+  "message": "Plan a 5-day Dubai trip with hotels and a budget estimate."
+}
+```
+
+Optional `thread_id` associates the new run with a thread; optional `run_id` identifies that run for progress polling. Omitting `thread_id` generates one. Use a fresh thread for an independent trip.
+
+Responses include `success`, `thread_id`, `user_query`, `answer`, `requires_approval`, `approval_request`, `selected_agents`, `trip_constraints`, `supervisor_reasoning`, research-result fields, `itinerary`, guardrail fields, `approved`, `human_feedback`, `revision_count`, `revision_error`, and `llm_calls`.
+
+- `requires_approval: true`: display the draft and review controls.
+- A blocked request can return HTTP 200 with `success: true` and `guardrail_allowed: false`: processing succeeded, but research was not authorized.
+- Research fields can contain raw MCP data or unavailable messages; they are not uniformly structured evidence objects.
+- `llm_calls` is the current implementation's approximate counter, not exact billing or token usage.
+
+### Approve a draft
+
+```json
+{
+  "thread_id": "user_replace_with_saved_id",
+  "approved": true,
+  "feedback": ""
+}
+```
+
+### Request a revised draft
+
+```json
+{
+  "thread_id": "user_replace_with_saved_id",
+  "approved": false,
+  "feedback": "Change the destination to Canada and make it seven days."
+}
+```
+
+Review input is strict: `approved` must be a JSON Boolean, not `"true"`, `"false"`, or a number. Revision feedback must be nonempty. Invalid request bodies return validation errors. Resume requires a currently interrupted thread. Successful revision returns another pending draft, not an automatically approved final plan. If request rewriting fails, the old draft is retained for another review.
+
+### Load a saved trip
+
+```text
+GET /api/travel/threads/user_replace_with_saved_id
+```
+
+- `200`: saved pending review, final response, or blocked result.
+- `404`: no checkpoint state found for the ID.
+- `409`: the thread has pending execution without a review interrupt; it may still be running or have stopped before review.
+- `500`: checkpoint retrieval could not be completed.
+
+Use the same database that originally stored the trip.
+
+## State, persistence, and memory
+
+`TravelState` holds the current request, extracted constraints, selection, specialist outputs, draft, human feedback, revision metadata, final response, messages, and call counter.
+
+`PostgresSaver` persists per-thread graph checkpoints and intermediate writes. It enables durable HITL pause/resume and cross-agent state sharing. There is no separate application conversations table, vector memory, or automatic retrieval of old conversation history into planning prompts. A revision explicitly carries the current request forward; a new planning run resets constraints and research.
+
+The graph runs synchronously in FastAPI worker threads so the event loop can serve progress requests. `run_async()` bridges synchronous nodes to asynchronous MCP calls.
+
+## Research and guardrail limits
+
+| Area | What the current implementation establishes |
+|---|---|
+| Flights | Origin-airport departure timetable and model guidance. No destination/date-filtered booking search, live ticket quotes, or confirmed availability. |
+| Hotels | Web-search snippets and URLs. No verified room inventory or structured dated rate comparison. |
+| Weather | One extracted location, current conditions, and the first five provider forecast entries. Not five daily forecasts, multi-city aggregation, or weather aligned to future trip dates. |
+| Budget | Approximate model estimates and feasibility advice, not independently priced quotes. |
+| Input guardrail | LLM relevance/safety assessment with strict response validation. It does not comprehensively validate travel dates, duration, budget, or policy compliance. |
+| Guardrail failures | Missing/extra fields, incorrect types, malformed JSON, and provider exceptions stop research. A denied decision requires a nonempty reason. |
+| Human review | Controls whether a draft is finalized. Revisions can make additional model and provider calls; every revised draft requires approval. |
+
+This is a local learning demo: thread IDs are not an authentication mechanism, and the current API has no user ownership checks. Shared/public deployment needs authentication and thread authorization.
+
+## Project structure
+
+```text
+TripWise360/
+├── app.py                         # FastAPI routes and worker-thread graph calls
+├── backend.py                     # Supervisor, specialists, routing, review/revision, checkpoint helpers
+├── workflow_rules.py              # Strict guardrail, review, and revised-request contracts
+├── mcp_client.py                  # AviationStack, Tavily, and weather tool clients
+├── custom_weather_mcp_server.py   # OpenWeatherMap tools exposed through FastMCP
+├── logger.py                      # Colored console logging
+├── test.py                        # Live MCP tool-discovery diagnostic
+├── tests/
+│   └── test_review_workflow.py     # Offline graph and contract regression tests
+├── templates/index.html           # Planning, saved-trip loading, and review controls
+├── static/
+│   ├── script.js                  # API calls, progress polling, session reset, review UI
+│   └── style.css                  # Responsive workspace styles
+├── docs/
+│   ├── architecture.md            # Architecture notes and Mermaid source
+│   ├── architecture.svg           # Current diagram
+│   └── screenshots/               # Planned screenshot location; slots listed above
+├── .env.example                   # Configuration template; actual .env stays local
+├── requirements.txt
+└── Dockerfile
+```
+
+## Testing and diagnostics
+
+Run the offline regression suite:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The suite uses real LangGraph execution and in-memory checkpoints with mocked model and specialist responses. It covers strict guardrail/review contracts, revisions and repeated review, stale-research clearing, revalidation, rewrite failure recovery, saved-thread loading, and approval after recreating the graph instance. It does not exercise live PostgreSQL, external provider availability, browser rendering, or model decision quality.
+
+Basic syntax checks:
+
+```bash
+python -m py_compile app.py backend.py workflow_rules.py
+node --check static/script.js
+```
+
+Node.js is needed only for that optional JavaScript check; the application backend is Python.
+
+Live MCP discovery:
 
 ```bash
 python test.py
 ```
 
-This lists all tools available from each connected MCP server.
+This connects to configured MCP servers and lists tools. It requires the relevant credentials/network access and is separate from the offline tests. Tool discovery does not prove that the provider permits or returns useful data for a specific call.
 
----
+## Logging
 
-## 🐳 Docker
+Terminal logs identify node starts/completions, guardrail outcomes, supervisor selections, routing, model calls, MCP calls, state inputs/outputs, and human-review pause/resume. Available-result reads are logged conditionally to avoid implying that skipped specialists ran.
+
+| Tag | Meaning |
+|---|---|
+| `[SYSTEM]` | Startup, routing, checkpoint pause/resume, or graph status |
+| `[AGENT ▶]` / `[AGENT ✔]` | Node started / returned |
+| `[LLM]` | Model invocation and response |
+| `[MCP]` | Tool invocation, result, or tool error |
+| `[STATE]` | State input/output |
+| `[RESULT]` | Decision or useful result summary |
+| `[ERROR]` | Failure or fallback |
+
+An interrupted graph is logged as paused rather than complete. The human-review node runs again on resume, so its entry log can appear again. A returned tool call or completed node is not proof that its payload contains valid research.
+
+## Docker
 
 ```bash
 docker build -t tripwise360 .
-docker run -p 8000:8000 --env-file .env tripwise360
+docker run --rm -p 8000:8000 --env-file .env tripwise360
 ```
 
----
-
-## 🔑 API Keys & Plans
-
-| Service | Free Tier Limit | Used For |
-|---|---|---|
-| OpenAI | Pay-per-use | LLM calls across all agents |
-| AviationStack | 100 req/month | Flight schedules (`flight_arrival_departure_schedule`) |
-| Tavily | 1,000 req/month | Hotel & travel web search |
-| OpenWeatherMap | 60 calls/min | Current weather + 5-day forecast |
-| AWS RDS PostgreSQL | db.t3.micro free tier | Conversation memory / checkpointing |
-
-> **Note:** The current flight integration calls an airport timetable tool. Do not assume the free plan permits it. Provider errors fall back to general guidance; ticket prices are not retrieved.
-
----
-
-## 💡 Key Design Decisions
-
-**Why LangGraph instead of a simple chain?**
-LangGraph gives each agent its own node with explicit edges, making it easy to add, remove, or reorder agents without touching other agents' logic. The shared state means any agent can access any prior result.
-
-**Why MCP instead of direct API calls?**
-MCP decouples the tool implementation from the agent logic. Swapping AviationStack for another flight API only requires changing the MCP server — the agents don't change. It also makes tools reusable across different LLM applications.
-
-**Why a custom weather MCP server?**
-OpenWeatherMap doesn't have a published MCP server. `custom_weather_mcp_server.py` wraps it in ~60 lines using `FastMCP`, making it a first-class tool indistinguishable from third-party MCP servers.
-
-**Why PostgreSQL for state?**
-LangGraph's `PostgresSaver` checkpointer persists the full graph state after every node execution. This supports persisted HITL pause/resume; revision feedback is explicitly merged into the current request. General conversation-history retrieval is not implemented. This project uses an **AWS RDS PostgreSQL micro instance** as the backing store.
-
----
-
-## 📡 API Reference
-
-### `POST /api/travel`
-
-**Request:**
-```json
-{
-  "message": "Plan a 7-day Japan trip from New York under $5000",
-  "thread_id": "optional-existing-thread-id"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "thread_id": "user_abc123",
-  "answer": "## Your Complete Japan Trip Plan...",
-  "flight_results": "## Flight Information...",
-  "hotel_results": "## Hotel Recommendations...",
-  "itinerary": "## Day-by-Day Plan...",
-  "llm_calls": 4
-}
-```
-
-### `GET /health`
-```json
-{ "status": "ok", "message": "AI Travel Planner API is running" }
-```
-
----
-
-## 🗺️ Flow Diagram
-
-See the [current architecture](docs/architecture.md) and [SVG diagram](docs/architecture.svg). Historical terminal screenshots below may show the earlier fixed sequential pipeline.
-
----
-
-## 🖥️ Demo Logs — Colored Terminal Output
-
-TripWise 360 prints richly colored, structured logs to the terminal so you can follow every agent step, LLM call, MCP tool invocation, and state transition in real time — ideal for demos and debugging.
-
-### UI — Main Interface
-
-![TripWise 360 main interface showing a Dubai trip query with results](docs/screenshots/ui.png)
-
-### UI — Agent final response
-
-The agent providing final Itinerary
-
-![Agent progress tracker showing Flights → Hotels → Weather → Itinerary running](docs/screenshots/agent-result.png)
-
-### Terminal — Colored Log Output
-
-![Colored terminal logs: Flight Agent, LLM IATA extraction, AviationStack MCP call](docs/screenshots/logs.png)
-
-### Log Color Scheme
-
-| Color | Tag | Fired when |
-|---|---|---|
-| **Bold White** | `[SYSTEM  ]` | App startup, graph build, DB connection |
-| **Bold Cyan** | `[AGENT ▶ ]` / `[AGENT ✔ ]` | Agent node starts / finishes |
-| **Bold Magenta** | `[LLM  🧠 ]` / `[LLM  ✔  ]` | Every LLM invocation and response |
-| **Bold Yellow** | `[MCP  🔧 ]` / `[MCP  ✔  ]` | MCP tool call dispatched / result received |
-| **Bold Red** | `[MCP  ✖  ]` / `[ERROR  ✖]` | MCP failure or non-fatal fallback |
-| **Bold Blue** | `[STATE 📖]` / `[STATE 📝]` | Shared state read / write |
-| **Bold Green** | `[RESULT ✦]` | Meaningful data obtained (IATA codes, MCP ready, etc.) |
-| **Dim white** | `────` | Section dividers between pipeline steps |
-
-### Sample Log Trace
-
-```
-════════════════════════════════════════════════════════════════
-  🌍 TRIPWISE 360  ·  NEW REQUEST
-  Thread : user_a2da006a1b104d4f889c8edb63bd44e0
-  Query  : Plan a 5 days Maldives honeymoon trip from New York…
-════════════════════════════════════════════════════════════════
-
-────────────────────────────────────────────────────────────────
-14:47:59  [AGENT ▶ ]  FLIGHT AGENT   Plan a 5 days Maldives honeymoon tri…
-────────────────────────────────────────────────────────────────
-14:47:59  [STATE 📖]  FlightAgent  reading  user_query
-──── Step 1 · LLM → extract IATA codes ─────────────────────────────────────
-14:47:59  [LLM  🧠 ]  Calling gpt-5-nano  → extract IATA codes from query
-14:48:03  [LLM  ✔  ]  IATA extraction complete  (48 chars)
-14:48:03  [RESULT ✦]  IATA codes   Departure=JFK  Arrival=MLE
-──── Step 2 · AviationStack MCP → flight schedule ───────────────────────────
-14:48:03  [MCP  🔧 ]  AviationStack → flight_arrival_departure_schedule
-            {'airport_iata_code': 'JFK', 'schedule_type': 'departure'}
-14:48:03  [SYSTEM  ]  Connecting to AviationStack MCP (stdio/uvx) …
-14:48:04  [RESULT ✦]  AviationStack MCP ready   tools: ['get_flight_status', …]
-14:48:05  [MCP  ✔  ]  AviationStack ← flight_arrival_departure_schedule
-──── Step 3 · LLM → generate flight guidance ────────────────────────────────
-14:48:05  [LLM  🧠 ]  Calling gpt-5-nano  → generate flight recommendations
-14:48:08  [LLM  ✔  ]  flight recommendations complete  (1243 chars)
-14:48:08  [STATE 📝]  FlightAgent  writing  flight_results
-14:48:08  [AGENT ✔ ]  FLIGHT AGENT done   1243 chars written to state
-
-────────────────────────────────────────────────────────────────
-14:48:08  [AGENT ▶ ]  HOTEL AGENT
-────────────────────────────────────────────────────────────────
-14:48:08  [STATE 📖]  HotelAgent  reading  user_query
-14:48:08  [MCP  🔧 ]  Tavily → tavily_search  {'query': 'Best hotels for…'}
-14:48:09  [MCP  ✔  ]  Tavily ← tavily_search  {"results": […]}
-14:48:09  [STATE 📝]  HotelAgent  writing  hotel_results
-14:48:09  [AGENT ✔ ]  HOTEL AGENT done
-
-────────────────────────────────────────────────────────────────
-14:48:09  [AGENT ▶ ]  WEATHER AGENT
-────────────────────────────────────────────────────────────────
-14:48:09  [LLM  🧠 ]  Calling gpt-5-nano  → extract destination city
-14:48:10  [LLM  ✔  ]  destination extraction complete
-14:48:10  [RESULT ✦]  Destination identified   Maldives
-14:48:10  [MCP  🔧 ]  WeatherMCP → get_current_weather  {'city': 'Maldives'}
-14:48:11  [MCP  ✔  ]  WeatherMCP ← get_current_weather
-14:48:11  [MCP  🔧 ]  WeatherMCP → get_forecast  {'city': 'Maldives'}
-14:48:12  [MCP  ✔  ]  WeatherMCP ← get_forecast
-14:48:12  [STATE 📝]  WeatherAgent  writing  weather_results
-14:48:12  [AGENT ✔ ]  WEATHER AGENT done
-
-────────────────────────────────────────────────────────────────
-14:48:12  [AGENT ▶ ]  ITINERARY AGENT
-────────────────────────────────────────────────────────────────
-14:48:12  [STATE 📖]  ItineraryAgent  reading  flight_results
-14:48:12  [STATE 📖]  ItineraryAgent  reading  hotel_results
-14:48:12  [STATE 📖]  ItineraryAgent  reading  weather_results
-14:48:12  [LLM  🧠 ]  Calling gpt-5-nano  → generate day-by-day itinerary
-14:48:16  [LLM  ✔  ]  itinerary generation complete  (2187 chars)
-14:48:16  [STATE 📝]  ItineraryAgent  writing  itinerary
-14:48:16  [AGENT ✔ ]  ITINERARY AGENT done   2187 chars
-
-────────────────────────────────────────────────────────────────
-14:48:16  [AGENT ▶ ]  FINAL AGENT
-────────────────────────────────────────────────────────────────
-14:48:16  [STATE 📖]  FinalAgent  reading  flight_results
-14:48:16  [STATE 📖]  FinalAgent  reading  hotel_results
-14:48:16  [STATE 📖]  FinalAgent  reading  weather_results
-14:48:16  [STATE 📖]  FinalAgent  reading  itinerary
-14:48:16  [LLM  🧠 ]  Calling gpt-5-nano  → format complete travel response
-14:48:21  [LLM  ✔  ]  final response formatting complete  (3456 chars)
-14:48:21  [RESULT ✦]  Final response ready   3456 chars total
-14:48:21  [AGENT ✔ ]  FINAL AGENT done   all sections assembled ✈️ 🏨 🌤️ 🗓️
-
-════════════════════════════════════════════════════════════════
-  ✅ PLAN COMPLETE  ·  Thread: user_a2da006a…  ·  LLM calls: 5
-════════════════════════════════════════════════════════════════
-```
-
-### What the logs reveal about the architecture
-
-- **Agent coordination** — each `[AGENT ▶]` / `[AGENT ✔]` pair shows the hand-off sequence: Flight → Hotel → Weather → Itinerary → Final
-- **LLM calls are explicit** — every `[LLM 🧠]` line shows *why* the LLM is being called (extraction, generation, formatting), not just that it was called
-- **MCP tool calls are traced** — `[MCP 🔧]` shows the exact tool name and arguments sent; `[MCP ✔]` confirms the response came back
-- **State flow is visible** — `[STATE 📖]` / `[STATE 📝]` shows which agent reads and writes which field, making the shared-state pattern concrete
-- **Timing is implicit** — the `HH:MM:SS` prefix on every line lets you see where time is actually spent (MCP round-trips vs LLM latency)
-
----
-
-## 🤝 Contributing
-
-1. Fork the repo
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Commit your changes: `git commit -m "Add my feature"`
-4. Push: `git push -u origin feature/my-feature`
-5. Open a Pull Request
-
----
-
-## 📄 License
-
-MIT License — free to use, modify, and distribute.
-
----
-
-## 🙏 Acknowledgements
-
-- [LangGraph](https://github.com/langchain-ai/langgraph) — agent orchestration framework
-- [LangChain MCP Adapters](https://github.com/langchain-ai/langchain-mcp-adapters) — MCP ↔ LangChain bridge
-- [AviationStack](https://aviationstack.com) — real-time flight data API
-- [Tavily](https://tavily.com) — AI-optimized search API
-- [OpenWeatherMap](https://openweathermap.org) — weather data API
-- [FastMCP](https://github.com/jlowin/fastmcp) — MCP server framework
+The Dockerfile uses a Python 3.12 multi-stage build, installs the Python dependencies and `uvx`, and starts Uvicorn on port 8000 with two workers. Runtime credentials are supplied through environment variables; `.env` is not copied into the image. PostgreSQL must be reachable from the container. The image's live provider subprocesses and database connection still need validation in your target environment.

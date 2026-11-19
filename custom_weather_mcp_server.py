@@ -1,3 +1,8 @@
+"""Expose two OpenWeatherMap HTTP calls as MCP tools.
+
+mcp_client.py launches this file in a subprocess. @mcp.tool() makes each function
+available to MCP clients; the graph does not call these Python functions directly.
+"""
 from mcp.server.fastmcp import FastMCP
 import requests
 import os 
@@ -13,6 +18,7 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
 @mcp.tool()
 def get_current_weather(city: str):
+    """Return a small current-conditions payload in metric units for one location."""
 
     response = requests.get(
         "https://api.openweathermap.org/data/2.5/weather",
@@ -41,6 +47,7 @@ def get_current_weather(city: str):
 
 @mcp.tool()
 def get_forecast(city: str):
+    """Return the first five forecast entries, not five aggregated daily forecasts."""
 
     url = (
         "https://api.openweathermap.org/data/2.5/forecast"
@@ -61,7 +68,7 @@ def get_forecast(city: str):
 
     forecast = []
 
-    # Return first 5 forecast entries
+    # Keep the first five provider time slots; these are not matched to trip dates.
     for item in data["list"][:5]:
 
         forecast.append(

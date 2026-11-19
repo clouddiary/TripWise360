@@ -1,3 +1,6 @@
+// Browser controller: planning → draft review → revision or final response.
+// The backend owns execution/checkpoints; this file renders responses and polls progress.
+// Session storage survives refreshes; Open Trip recovers database state after a restart.
 let currentThreadId = sessionStorage.getItem("travel_thread_id") || null;
 let latestAnswerMarkdown = "";
 let pendingReview = null;
@@ -166,6 +169,7 @@ function renderProgress(data) {
     }
 }
 
+// Each polling cycle captures a generation number. Stale replies cannot repaint a new trip.
 function stopProgress() {
     progressGeneration++;
     clearTimeout(progressTimer);
@@ -289,6 +293,7 @@ async function sendMessage() {
         return;
     }
 
+    // A trip reset increments tripGeneration; ignore responses from the old request.
     const generation = tripGeneration;
     const runId = crypto.randomUUID();
     if (!currentThreadId) currentThreadId = "user_" + crypto.randomUUID();
@@ -324,6 +329,7 @@ async function sendMessage() {
     }
 }
 
+// Loading is a read-only GET: do not send a saved ID through Generate Plan.
 async function openSavedTrip() {
     if (requestBusy) return;
     hideError();
@@ -352,6 +358,7 @@ async function openSavedTrip() {
     }
 }
 
+// Resume the saved interrupt: false + feedback returns another draft for review.
 async function submitReview(approved) {
     if (requestBusy || !pendingReview) return;
     hideError();

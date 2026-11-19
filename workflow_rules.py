@@ -3,6 +3,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class GuardrailDecision(BaseModel):
+    # strict rejects coercion (e.g. "false" to False); extra rejects unexpected keys.
+    """Exact contract required before any research is authorized."""
     model_config = ConfigDict(strict=True, extra="forbid")
     allowed: bool
     reason: str
@@ -15,6 +17,7 @@ class GuardrailDecision(BaseModel):
 
 
 class HumanReview(BaseModel):
+    """Shared contract for the HTTP request and resumed graph decision."""
     model_config = ConfigDict(strict=True, extra="forbid")
     approved: bool
     feedback: str = ""
@@ -28,5 +31,6 @@ class HumanReview(BaseModel):
 
 
 class RevisedRequest(BaseModel):
+    """A complete replacement request; empty or non-string rewrites are invalid."""
     model_config = ConfigDict(strict=True, extra="forbid", str_strip_whitespace=True)
     updated_request: str = Field(min_length=1)

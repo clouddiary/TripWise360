@@ -1,3 +1,10 @@
+"""Travel-planning graph and its entry points for FastAPI.
+
+Read in this order: TravelState → supervisor_agent → specialist agents →
+human_approval_agent/revision_agent → graph edges → HTTP-facing helpers.
+Nodes return partial state updates; LangGraph merges and checkpoints them.
+Importing this module initializes the model client and PostgreSQL checkpointer.
+"""
 import os
 import json
 import certifi
@@ -72,6 +79,7 @@ def run_async(coro):
 # =========================
 
 def get_database_url():
+    """Require a database URL and default to TLS unless sslmode is explicit."""
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         raise ValueError("DATABASE_URL is missing.")
@@ -108,8 +116,11 @@ log_system("LLM ready ✔")
 # State
 # =========================
 class TravelState(TypedDict, total=False):
+    # Reducer: append returned messages instead of replacing the whole history.
+    """Shared graph data; total=False permits partial updates from each node."""
     messages: Annotated[list[AnyMessage], operator.add]
     user_query: str
+    # thread_id lives in graph configuration; run_id identifies one UI request.
     run_id: str
 
     # Supervisor + guardrail state
@@ -148,6 +159,7 @@ KNOWN_AGENTS = {
     "itinerary_agent",
 }
 
+# Selection is dynamic, but execution follows this fixed order (no parallelism).
 AGENT_ORDER = [
     "flight_agent",
     "hotel_agent",
@@ -165,6 +177,7 @@ def log_available_state(agent: str, state: TravelState, fields):
 
 
 def _llm_text(system_prompt: str, user_prompt: str) -> str:
+    """Call the shared model and return its text; this does not update graph state."""
     response = llm.invoke(
         [
             SystemMessage(content=system_prompt),
@@ -182,10 +195,13 @@ def _json_from_llm(text: str) -> dict[str, Any]:
     if start == -1 or end == -1 or end < start:
         raise ValueError("The model did not return a JSON object.")
 
+    # This tolerant parser is only for supervisor planning. Guardrail decisions
+    # use strict model_validate_json() and must not accept surrounding prose.
     return json.loads(text[start : end + 1])
 
 
 def _empty_constraints() -> dict[str, Any]:
+    """Create a fresh constraints dictionary for a new or revised research run."""
     return {
         "destination": "",
         "origin": "",
@@ -200,6 +216,7 @@ def _empty_constraints() -> dict[str, Any]:
 # Supervisor Agent + Input Guardrail
 # =========================
 def supervisor_agent(state: TravelState):
+    """Validate input first, then select specialists and extract trip requirements."""
     log_agent_start("Supervisor", state["user_query"])
     log_state_read("Supervisor", "user_query")
     query = state["user_query"]
@@ -233,6 +250,8 @@ User request:
             guardrail_prompt,
         )
         log_llm_done("input guardrail", len(guardrail_raw))
+        # Never use bool(raw_value): bool("false") is True in Python. The schema
+        # requires an actual JSON Boolean and rejects missing/extra fields.
         decision = GuardrailDecision.model_validate_json(guardrail_raw)
         allowed = decision.allowed
         guardrail_reason = decision.reason.strip()
@@ -349,6 +368,7 @@ User request:
 # Guardrail blocked response
 # =========================
 def guardrail_blocked_agent(state: TravelState):
+    """Return the validation reason and terminate without research or approval."""
     log_agent_start("Guardrail Blocked")
     log_state_read("GuardrailBlocked", "guardrail_reason")
     reason = state.get("final_response") or state.get("guardrail_reason") or (
@@ -448,6 +468,7 @@ def extract_destination(query: str) -> str:
 # =========================
 
 def flight_agent(state: TravelState):
+    """Attempt timetable research, then generate flight guidance with available data."""
     log_agent_start("Flight Agent", state["user_query"])
     log_state_read("FlightAgent", "user_query")
 
@@ -526,6 +547,7 @@ def flight_agent(state: TravelState):
 # =========================
 
 def hotel_agent(state: TravelState):
+    """Search through Tavily MCP and store its returned content in shared state."""
     log_agent_start("Hotel Agent", state["user_query"])
     log_state_read("HotelAgent", "user_query")
 
@@ -557,6 +579,7 @@ def hotel_agent(state: TravelState):
 # =========================
 
 def weather_agent(state: TravelState):
+    """Research one extracted destination using current-weather and forecast tools."""
     log_agent_start("Weather Agent", state["user_query"])
     log_state_read("WeatherAgent", "user_query")
 
@@ -600,6 +623,7 @@ def weather_agent(state: TravelState):
 # Budget Agent - new specialist
 # =========================
 def budget_agent(state: TravelState):
+    """Estimate feasibility from the current request and available specialist results."""
     log_agent_start("Budget Agent", state["user_query"])
     for field in ("user_query", "trip_constraints", "flight_results", "hotel_results", "weather_results"):
         log_available_state("BudgetAgent", state, (field,))
@@ -653,6 +677,7 @@ If exact live prices are unavailable, clearly label estimates as approximate.
 # =========================
 
 def itinerary_agent(state: TravelState):
+    """Create a draft for human review, not an approved final response."""
     log_agent_start("Itinerary Agent", state["user_query"])
 
     log_available_state("ItineraryAgent", state, (
@@ -708,10 +733,13 @@ Make the itinerary practical, budget-aware, and easy to follow.
 # Human-in-the-Loop approval
 # =========================
 def human_approval_agent(state: TravelState):
+    """Pause the graph until a strict approval or revision decision is supplied."""
     log_agent_start("Human Approval")
     log_state_read("HumanApproval", "itinerary")
     log_system("HITL checkpoint reached: awaiting human review (node replays on resume).")
     # Do not wrap interrupt() in try/except. LangGraph uses it to pause execution.
+    # Initial execution saves a checkpoint and returns control to the browser.
+    # Command(resume=...) replays this node; interrupt() then returns the decision.
     review = interrupt(
         {
             "question": "Do you approve this itinerary?",
@@ -745,6 +773,7 @@ def human_approval_agent(state: TravelState):
 
 
 def route_after_review(state: TravelState) -> str:
+    """Choose finalization only for explicit approval; otherwise prepare a revision."""
     return "final_agent" if state.get("approved") is True else "revision"
 
 
@@ -790,6 +819,8 @@ Latest user feedback:
 
     log_state_write("Revision", "user_query", revised.updated_request)
     log_agent_done("Revision", "returning to guardrail and supervisor")
+    # A destination or budget can change. Clear old evidence before rerunning
+    # research so a revised draft cannot accidentally reuse an earlier trip.
     return {
         "user_query": revised.updated_request,
         "selected_agents": [],
@@ -806,6 +837,7 @@ Latest user feedback:
 
 
 def route_after_revision(state: TravelState) -> str:
+    """Retry review of the old draft if rewriting fails; otherwise replan."""
     return "human_approval" if state.get("revision_error") else "supervisor"
 
 
@@ -813,6 +845,8 @@ def route_after_revision(state: TravelState) -> str:
 # Final Response Agent - formats an explicitly approved draft
 # =========================
 def final_agent(state: TravelState):
+    # Defense in depth: routing should reach this node only after approval.
+    """Format the approved draft without reapplying earlier relative revision requests."""
     if state.get("approved") is not True:
         raise ValueError("The current draft must be approved before finalization.")
     log_agent_start("Final Agent", "formatting approved response")
@@ -901,11 +935,13 @@ ROUTE_MAP = {
 
 
 def _selected_agents(state: TravelState) -> list[str]:
+    """Filter and order the selected names using the permitted specialist list."""
     selected = state.get("selected_agents", [])
     return [agent for agent in AGENT_ORDER if agent in selected]
 
 
 def route_from_supervisor(state: TravelState) -> str:
+    """Send denied requests to the stop node or start the selected specialists."""
     if not state.get("guardrail_allowed", True):
         log_system("Routing: supervisor → guardrail_blocked")
         return "guardrail_blocked"
@@ -917,6 +953,7 @@ def route_from_supervisor(state: TravelState) -> str:
 
 
 def route_after_agent(current_agent: str):
+    """Build a router that skips specialists not selected by the supervisor."""
     def route(state: TravelState) -> str:
         selected = _selected_agents(state)
         current_index = AGENT_ORDER.index(current_agent)
@@ -950,6 +987,7 @@ graph.add_node("human_approval", human_approval_agent)
 graph.add_node("revision", revision_agent)
 graph.add_node("final_agent", final_agent)
 
+# add_edge is unconditional; add_conditional_edges chooses one named destination.
 graph.add_edge(START, "supervisor")
 graph.add_conditional_edges("supervisor", route_from_supervisor, ROUTE_MAP)
 
@@ -967,6 +1005,7 @@ graph.add_conditional_edges(
 )
 
 graph.add_edge("itinerary_agent", "human_approval")
+# Approval finalizes. Feedback loops back through revision, guardrail and research.
 graph.add_conditional_edges("human_approval", route_after_review, {
     "final_agent": "final_agent", "revision": "revision",
 })
@@ -993,6 +1032,8 @@ _conn = psycopg.connect(
     row_factory=dict_row
 )
 
+# The same database + thread_id lets a restarted app resume a saved review.
+# setup() creates the checkpointer tables; it does not create semantic memory.
 checkpointer = PostgresSaver(_conn)
 checkpointer.setup()
 
@@ -1004,13 +1045,10 @@ log_system("LangGraph compiled — TripWise 360 is ready 🌍\n")
 
 
 # =========================
-# Entry point for FastAPI
-# =========================
-
-# =========================
 # FastAPI-facing helpers
 # =========================
 def _interrupt_payload(result: dict[str, Any]) -> dict[str, Any] | None:
+    """Read the first pause payload from a graph invocation result."""
     interrupts = result.get("__interrupt__", [])
     if not interrupts:
         return None
@@ -1025,6 +1063,7 @@ def _serialize_result(
     thread_id: str,
     log_status: bool = True,
 ) -> dict[str, Any]:
+    """Convert internal graph state into the JSON shape consumed by the UI."""
     messages = result.get("messages", [])
     last_message = messages[-1].content if messages else ""
     answer = result.get("final_response") or last_message
@@ -1084,6 +1123,8 @@ def load_travel_thread(thread_id: str) -> dict[str, Any]:
     snapshot = travel_graph.get_state({"configurable": {"thread_id": thread_id}})
     if not snapshot.values:
         raise LookupError("Trip not found. Check the thread ID and database connection.")
+    # Saved interrupts are attached to snapshot tasks; rebuild the same response
+    # shape used by a freshly paused invoke(), without invoking any agents.
     interrupts = [item for task in snapshot.tasks for item in getattr(task, "interrupts", ())]
     if snapshot.next and not interrupts:
         raise RuntimeError("This trip is running or stopped before review. Please wait for it to finish.")
@@ -1167,6 +1208,8 @@ def get_travel_progress(thread_id: str, run_id: str | None = None):
     if not state or (run_id and state.get("run_id") != run_id):
         return {"agents": [{"name": "supervisor", "status": "running"}]}
 
+    # The checkpoint records the next scheduled nodes and completed outputs.
+    # Polling can miss very short steps; a completed node may contain a tool error.
     next_nodes = set(snapshot.next)
     interrupted = any(getattr(task, "interrupts", ()) for task in snapshot.tasks)
     selected = _selected_agents(state)

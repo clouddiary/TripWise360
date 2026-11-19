@@ -1,11 +1,16 @@
+"""Connect graph nodes to external tools through MCP.
+
+HTTP connects to Tavily remotely; stdio starts AviationStack and weather as child
+processes. Tools are discovered lazily and cached. Their results can be MCP content
+blocks rather than plain strings, so callers must not assume a specific text shape.
+"""
 import os
 import sys
-import asyncio
 import certifi
 from pathlib import Path
 from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from logger import log_system, log_mcp_call, log_mcp_done, log_mcp_error, log_result, log_error
+from logger import log_system, log_result
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
@@ -20,14 +25,12 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 PROJECT_DIR = Path(__file__).resolve().parent
 WEATHER_SERVER_PATH = PROJECT_DIR / "custom_weather_mcp_server.py"
 
-# Preserve the full environment when starting local stdio MCP servers.
-AVIATION_ENV = os.environ.copy()
-AVIATION_ENV["AVIATION_STACK_API_KEY"] = AVIATIONSTACK_API_KEY or ""
-
+# Preserve environment variables needed by the custom Python weather subprocess.
 WEATHER_ENV = os.environ.copy()
 WEATHER_ENV["OPENWEATHER_API_KEY"] = OPENWEATHER_API_KEY or ""
 
 
+# Configuration defines how to connect; get_tools() below performs discovery.
 client = MultiServerMCPClient(
     {
        "tavily": {
@@ -116,6 +119,7 @@ search_tool = None
 
 async def initialize_mcp():
     global search_tool
+    # Reuse the discovered tool rather than listing tools for every hotel request.
     if search_tool is not None:
         return
 
@@ -172,6 +176,7 @@ async def aviation_mcp_call(tool_name: str, tool_args: dict = None):
             f"AviationStack tool '{tool_name}' not found. Available: {available or 'none'}"
         )
 
+    # ainvoke sends arguments to the MCP tool, which calls the provider API.
     result = await tool.ainvoke(tool_args or {})
     return result
 

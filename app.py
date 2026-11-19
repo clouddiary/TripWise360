@@ -1,3 +1,8 @@
+"""HTTP boundary for the demo: validate requests, call graph helpers, return JSON.
+
+The API does not ask the LLM how to load a saved trip: loading reads checkpoints.
+Planning/review run in worker threads so progress polling can continue concurrently.
+"""
 from pathlib import Path
 import traceback
 import uvicorn
@@ -35,16 +40,19 @@ templates = Jinja2Templates(
 
 
 class TravelRequest(BaseModel):
+    """Input for a planning run; omitting thread_id creates a new conversation."""
     message: str
     thread_id: str | None = None
     run_id: str | None = None
 
 
 class ApprovalRequest(HumanReview):
+    """Reuse strict review validation and add the saved thread identifier."""
     thread_id: str = Field(min_length=1)
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
+    """Serve the HTML shell; browser JavaScript calls the JSON endpoints."""
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -54,6 +62,7 @@ async def home(request: Request):
 
 @app.post("/api/travel")
 async def travel_planner(request_data: TravelRequest):
+    """Start research and return either a blocked response or a pending draft."""
     try:
         user_message = request_data.message.strip()
 
@@ -66,6 +75,7 @@ async def travel_planner(request_data: TravelRequest):
                 },
             )
 
+        # Graph/model calls block; keep them off FastAPI's async event loop.
         result = await run_in_threadpool(
             run_travel_agent,
             user_input=user_message,
@@ -95,6 +105,7 @@ async def travel_planner(request_data: TravelRequest):
 
 @app.post("/api/travel/approve")
 async def approve_travel_plan(request_data: ApprovalRequest):
+    """Resume a paused review; feedback produces another draft, not a final plan."""
     try:
         if not request_data.approved and not request_data.feedback.strip():
             return JSONResponse(
@@ -134,6 +145,7 @@ async def approve_travel_plan(request_data: ApprovalRequest):
 
 @app.get("/api/travel/threads/{thread_id}")
 async def open_travel_thread(thread_id: str):
+    """Load saved state without research; distinguish unknown and unfinished trips."""
     try:
         result = await run_in_threadpool(load_travel_thread, thread_id)
         return {"success": True, **result}
@@ -150,11 +162,13 @@ async def open_travel_thread(thread_id: str):
 
 @app.get("/api/travel/progress/{thread_id}")
 async def travel_progress(thread_id: str, run_id: str | None = None):
+    """Read checkpoint-derived progress without advancing the graph."""
     return await run_in_threadpool(get_travel_progress, thread_id, run_id)
 
 
 @app.get("/health")
 async def health_check():
+    """Report process availability, not live readiness of every external provider."""
     return {
         "status": "ok",
         "message": "TripMate AI API is running",
