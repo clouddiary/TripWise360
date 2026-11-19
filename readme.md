@@ -62,7 +62,7 @@ New screenshots will be added here. The obsolete screenshots have been removed; 
 
 ## Architecture
 
-![TripWise360 supervisor, guardrail, and HITL architecture](docs/architecture.svg)
+![TripWise360 supervisor, guardrail, and HITL architecture](docs/architecture-shared-state.svg)
 
 See [architecture details and editable Mermaid source](docs/architecture.md).
 
@@ -338,7 +338,7 @@ TripWise360/
 │   └── style.css                  # Responsive workspace styles
 ├── docs/
 │   ├── architecture.md            # Architecture notes and Mermaid source
-│   ├── architecture.svg           # Current diagram
+│   ├── architecture-shared-state.svg           # Current diagram
 │   └── screenshots/               # Planned screenshot location; slots listed above
 ├── .env.example                   # Configuration template; actual .env stays local
 ├── requirements.txt

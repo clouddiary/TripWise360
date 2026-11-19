@@ -1,6 +1,6 @@
 # TripWise360 — implemented architecture
 
-![Architecture](architecture.svg)
+![Architecture](architecture-shared-state.svg)
 
 ```mermaid
 flowchart TD
