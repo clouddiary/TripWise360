@@ -12,13 +12,17 @@ This application researches and drafts travel plans. It does not book flights or
 
 Create a new trip, choose a sample destination, or reopen a saved thread.
 
-![TripWise360 planning workspace with New Trip, Generate Plan, and Open Trip](docs/screenshots/home.png)
+![TripWise360 planning workspace with New Trip, Generate Plan, and Open Trip](docs/screenshots/1-trip-planning.png)
 
 ### Selected agents and human review
 
 The workflow displays the selected specialists and pauses on the draft for approval or revision feedback.
 
-![Selected agents, draft itinerary, and human-in-the-loop review controls](docs/screenshots/agent_response_with_hitl.png)
+![Selected agents, draft itinerary, and human-in-the-loop review controls](docs/screenshots/2-draft-trip-review.png)
+
+See the draft details below, including the itinerary and review actions.
+
+![Draft itinerary details with approval and revision options](docs/screenshots/3-draft-trip-review.png)
 
 ### Saved-trip recovery and final response
 
@@ -34,7 +38,7 @@ Terminal logs show supervisor decisions, specialist activity, routing, and revie
 
 ## Architecture
 
-![TripWise360 supervisor, guardrail, shared-state, and HITL architecture](docs/screenshots/architecture_diagram.jpg)
+![TripWise360 supervisor, guardrail, shared-state, and HITL architecture](docs/screenshots/architecture-diagram.jpg)
 
 See [architecture details and editable Mermaid source](docs/architecture.md). The [editable SVG diagram](docs/architecture-shared-state.svg) is also available.
 

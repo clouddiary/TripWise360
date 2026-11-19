@@ -1,6 +1,6 @@
 # TripWise360 — implemented architecture
 
-![Architecture](screenshots/architecture_diagram.jpg)
+![Architecture](screenshots/architecture-diagram.jpg)
 
 [Editable SVG version](architecture-shared-state.svg).
 
